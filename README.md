@@ -74,6 +74,20 @@ lib/
 
 ---
 
+## continuing development with claude code
+
+this project was built using the [superpowers plugin](https://github.com/obra/superpowers) for Claude Code. install it once globally and every Claude Code session gets structured TDD, brainstorming, planning, and debugging workflows automatically.
+
+```bash
+claude plugin install superpowers@claude-plugins-official --global
+```
+
+or via the marketplace: open Claude Code → `/plugin install superpowers`
+
+after install, just open Claude Code normally in this repo — superpowers activates automatically.
+
+---
+
 ## docs
 
 - [design spec](docs/superpowers/specs/2026-04-14-ispy-design.md)
