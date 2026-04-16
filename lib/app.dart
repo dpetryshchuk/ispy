@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:ispy_ios/core/model/gemma_service.dart';
+import 'package:ispy_ios/features/setup/model_download_screen.dart';
 import 'package:ispy_ios/shared/ispy_tab_bar.dart';
 
 class IspyApp extends StatefulWidget {
@@ -12,6 +14,7 @@ class IspyApp extends StatefulWidget {
 class _IspyAppState extends State<IspyApp> {
   final GemmaService _gemmaService = GemmaService();
   bool _loading = true;
+  bool _needsDownload = false;
   String? _error;
 
   @override
@@ -22,6 +25,12 @@ class _IspyAppState extends State<IspyApp> {
 
   Future<void> _loadModel() async {
     try {
+      await FlutterGemma.initialize();
+      final exists = await _gemmaService.modelExists();
+      if (!exists) {
+        if (mounted) setState(() { _loading = false; _needsDownload = true; });
+        return;
+      }
       await _gemmaService.load();
       if (mounted) setState(() => _loading = false);
     } catch (e) {
@@ -32,6 +41,11 @@ class _IspyAppState extends State<IspyApp> {
         });
       }
     }
+  }
+
+  void _onModelDownloaded() {
+    setState(() { _needsDownload = false; _loading = true; });
+    _loadModel();
   }
 
   @override
@@ -56,9 +70,11 @@ class _IspyAppState extends State<IspyApp> {
       ),
       home: _loading
           ? const _SplashScreen()
-          : _error != null
-              ? _ModelErrorScreen(message: _error!)
-              : IspyTabBar(gemmaService: _gemmaService),
+          : _needsDownload
+              ? ModelDownloadScreen(onModelReady: _onModelDownloaded)
+              : _error != null
+                  ? _ModelErrorScreen(message: _error!)
+                  : IspyTabBar(gemmaService: _gemmaService),
     );
   }
 }
@@ -87,7 +103,7 @@ class _SplashScreen extends StatelessWidget {
             Text(
               'waking up.',
               style: TextStyle(
-                color: Colors.white18,
+                color: Color(0x2EFFFFFF),
                 fontSize: 11,
                 letterSpacing: 1,
               ),

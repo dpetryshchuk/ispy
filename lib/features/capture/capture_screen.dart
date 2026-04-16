@@ -58,7 +58,7 @@ class _CaptureScreenState extends State<CaptureScreen> {
   Future<void> _onProcess() async {
     if (_pendingPhoto == null) return;
     setState(() => _state = _CaptureState.processing);
-    _contextController.unfocus();
+    FocusManager.instance.primaryFocus?.unfocus();
 
     try {
       final photoFile = File(_pendingPhoto!.path);

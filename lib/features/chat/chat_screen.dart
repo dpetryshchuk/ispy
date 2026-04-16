@@ -144,7 +144,7 @@ class _ChatScreenState extends State<ChatScreen> {
           Container(
             decoration: const BoxDecoration(
               border: Border(
-                top: BorderSide(color: Colors.white08),
+                top: BorderSide(color: Color(0x14FFFFFF)),
               ),
             ),
             padding: EdgeInsets.only(
@@ -161,7 +161,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     style: const TextStyle(color: Colors.white, fontSize: 14),
                     decoration: const InputDecoration(
                       hintText: 'ask ispy something',
-                      hintStyle: TextStyle(color: Colors.white18),
+                      hintStyle: TextStyle(color: Color(0x2EFFFFFF)),
                       border: InputBorder.none,
                       isDense: true,
                     ),

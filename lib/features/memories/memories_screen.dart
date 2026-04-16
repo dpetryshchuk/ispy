@@ -96,7 +96,7 @@ class _EntryTile extends StatelessWidget {
               width: 48,
               height: 48,
               decoration: BoxDecoration(
-                color: Colors.white08,
+                color: Colors.white.withOpacity(0.08),
                 borderRadius: BorderRadius.circular(6),
               ),
             ),

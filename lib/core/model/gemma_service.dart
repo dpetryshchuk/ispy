@@ -10,8 +10,6 @@ class GemmaService {
 
   bool get isLoaded => _isLoaded;
 
-  /// Path where the model file should be placed.
-  /// For POC: place model file in app documents directory or app bundle.
   Future<String> get modelPath async {
     final dir = await getApplicationDocumentsDirectory();
     return p.join(dir.path, _modelFileName);
@@ -22,39 +20,39 @@ class GemmaService {
     return File(path).exists();
   }
 
-  /// Load the model. Throws a descriptive error if model file not found.
   Future<void> load() async {
     if (_isLoaded) return;
     final path = await modelPath;
     if (!await File(path).exists()) {
       throw Exception(
-        'Gemma 4 E4B model not found.\n\n'
+        'Gemma model not found.\n\n'
         'Download gemma4-e4b-it-int4.task from:\n'
         'https://www.kaggle.com/models/google/gemma\n\n'
         'Then place it at:\n$path',
       );
     }
-    _model = await InferenceModel.create(
-      modelPath: path,
+    // ignore: deprecated_member_use
+    await FlutterGemmaPlugin.instance.modelManager.setModelPath(path);
+    _model = await FlutterGemmaPlugin.instance.createModel(
+      modelType: ModelType.gemmaIt,
+      supportImage: true,
       preferredBackend: PreferredBackend.gpu,
     );
     _isLoaded = true;
   }
 
-  /// Single-turn text generation. No tool loop.
   Future<String> generate(String prompt) async {
     if (!_isLoaded || _model == null) throw StateError('model not loaded');
     final session = await _model!.createSession();
-    await session.addQueryChunk(TextPart(text: prompt));
+    await session.addQueryChunk(Message.text(text: prompt));
     final response = StringBuffer();
-    await for (final token in session.generateCandidates()) {
+    await for (final token in session.getResponseAsync()) {
       response.write(token);
     }
     await session.close();
     return response.toString().trim();
   }
 
-  /// Multimodal generation — image + text prompt.
   Future<String> generateWithImage({
     required File imageFile,
     required String prompt,
@@ -62,10 +60,12 @@ class GemmaService {
     if (!_isLoaded || _model == null) throw StateError('model not loaded');
     final session = await _model!.createSession();
     final imageBytes = await imageFile.readAsBytes();
-    await session.addQueryChunk(ImagePart(bytes: imageBytes));
-    await session.addQueryChunk(TextPart(text: prompt));
+    await session.addQueryChunk(Message.withImage(
+      text: prompt,
+      imageBytes: imageBytes,
+    ));
     final response = StringBuffer();
-    await for (final token in session.generateCandidates()) {
+    await for (final token in session.getResponseAsync()) {
       response.write(token);
     }
     await session.close();

@@ -77,7 +77,7 @@ class _WikiScreenState extends State<WikiScreen> {
       }
     }
 
-    final algorithm = FruchtermanReingoldAlgorithm(iterations: 1000);
+    final algorithm = FruchtermanReingoldAlgorithm(FruchtermanReingoldConfiguration(iterations: 1000));
 
     return Scaffold(
       backgroundColor: Colors.black,
