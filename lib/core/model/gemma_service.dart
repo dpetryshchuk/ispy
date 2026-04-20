@@ -15,24 +15,13 @@ class GemmaService {
     return p.join(dir.path, _modelFileName);
   }
 
-  Future<bool> modelExists() async {
-    final path = await modelPath;
-    return File(path).exists();
-  }
+  Future<bool> modelExists() async => File(await modelPath).exists();
 
   Future<void> load() async {
     if (_isLoaded) return;
     final path = await modelPath;
-    if (!await File(path).exists()) {
-      throw Exception(
-        'Gemma model not found.\n\n'
-        'Download gemma4-e4b-it-int4.task from:\n'
-        'https://www.kaggle.com/models/google/gemma\n\n'
-        'Then place it at:\n$path',
-      );
-    }
-    // ignore: deprecated_member_use
-    await FlutterGemmaPlugin.instance.modelManager.setModelPath(path);
+    if (!await File(path).exists()) throw Exception('Model not found at $path');
+    await FlutterGemmaPlugin.instance.modelManager.setModelPath(path); // ignore: deprecated_member_use
     _model = await FlutterGemmaPlugin.instance.createModel(
       modelType: ModelType.gemmaIt,
       supportImage: true,
@@ -41,35 +30,25 @@ class GemmaService {
     _isLoaded = true;
   }
 
-  Future<String> generate(String prompt) async {
-    if (!_isLoaded || _model == null) throw StateError('model not loaded');
-    final session = await _model!.createSession();
-    await session.addQueryChunk(Message.text(text: prompt));
-    final response = StringBuffer();
-    await for (final token in session.getResponseAsync()) {
-      response.write(token);
-    }
-    await session.close();
-    return response.toString().trim();
+  InferenceModel get model {
+    if (_model == null) throw StateError('model not loaded');
+    return _model!;
   }
 
-  Future<String> generateWithImage({
+  /// Single-shot image description — no tools, pure vision.
+  Future<String> describeImage({
     required File imageFile,
     required String prompt,
   }) async {
-    if (!_isLoaded || _model == null) throw StateError('model not loaded');
-    final session = await _model!.createSession();
-    final imageBytes = await imageFile.readAsBytes();
-    await session.addQueryChunk(Message.withImage(
-      text: prompt,
-      imageBytes: imageBytes,
-    ));
-    final response = StringBuffer();
+    final session = await model.createSession();
+    final bytes = await imageFile.readAsBytes();
+    await session.addQueryChunk(Message.withImage(text: prompt, imageBytes: bytes));
+    final buf = StringBuffer();
     await for (final token in session.getResponseAsync()) {
-      response.write(token);
+      buf.write(token);
     }
     await session.close();
-    return response.toString().trim();
+    return buf.toString().trim();
   }
 
   Future<void> dispose() async {
