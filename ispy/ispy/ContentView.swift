@@ -4,46 +4,41 @@ struct ContentView: View {
     @State private var service = LLMService()
 
     var body: some View {
-        VStack(spacing: 24) {
-            switch service.state {
-            case .needsDownload:
-                Text("gemma-3n-E4B (~4 GB)")
+        switch service.state {
+        case .needsDownload:
+            VStack(spacing: 24) {
+                Text("gemma-3n-E2B (~2 GB)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Button("Download Model") {
-                    service.download()
-                }
-                .buttonStyle(.borderedProminent)
+                Button("Download Model") { service.download() }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding()
 
-            case .downloading(let p):
-                ProgressView(value: p)
-                    .padding(.horizontal)
+        case .downloading(let p):
+            VStack(spacing: 12) {
+                ProgressView(value: p).padding(.horizontal)
                 Text("\(Int(p * 100))%")
+            }
+            .padding()
 
-            case .loading:
+        case .loading:
+            VStack(spacing: 12) {
                 ProgressView()
                 Text("Loading model...")
+            }
 
-            case .ready(let response):
-                Text("Prompt: \"\(LLMService.prompt)\"")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Divider()
-                ScrollView {
-                    Text(response)
-                        .padding()
-                        .textSelection(.enabled)
-                }
+        case .ready:
+            RootView(service: service)
 
-            case .error(let message):
+        case .error(let message):
+            VStack(spacing: 16) {
                 Text(message)
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)
-                    .padding()
                 Button("Retry") { service.start() }
             }
+            .padding()
         }
-        .padding()
-        .onAppear { service.start() }
     }
 }

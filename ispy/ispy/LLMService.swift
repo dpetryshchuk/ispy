@@ -8,18 +8,18 @@ final class LLMService: NSObject {
         case needsDownload
         case downloading(progress: Double)
         case loading
-        case ready(response: String)
+        case ready
         case error(message: String)
     }
 
-    static let modelFileName = "gemma-3n-E4B-it-int4.task"
-    static let modelURL = URL(string:
-        "https://huggingface.co/google/gemma-3n-E4B-it-litert-preview/resolve/main/gemma-3n-E4B-it-int4.task"
+    nonisolated static let modelFileName = "gemma-3n-E2B-it-int4.task"
+    nonisolated static let modelURL = URL(string:
+        "https://huggingface.co/google/gemma-3n-E2B-it-litert-preview/resolve/main/gemma-3n-E2B-it-int4.task"
     )!
-    static let hfToken = "REMOVED_HF_TOKEN"
-    static let prompt = "Describe yourself in one sentence."
+    nonisolated static let hfToken = "REMOVED_HF_TOKEN"
 
     var state: State = .needsDownload
+    private(set) var inference: LlmInference?
 
     private var modelPath: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -28,7 +28,7 @@ final class LLMService: NSObject {
 
     func start() {
         if FileManager.default.fileExists(atPath: modelPath.path) {
-            loadAndRun()
+            loadModel()
         }
     }
 
@@ -40,23 +40,30 @@ final class LLMService: NSObject {
         session.downloadTask(with: request).resume()
     }
 
-    func loadAndRun() {
+    func loadModel() {
         state = .loading
         let path = modelPath.path
         Task.detached(priority: .userInitiated) {
             do {
+                print("[ispy] loading model at \(path)")
                 let options = LlmInference.Options(modelPath: path)
                 options.maxTokens = 1024
+                options.maxImages = 1
                 let inference = try LlmInference(options: options)
-                let sessionOpts = LlmInference.Session.Options()
-                sessionOpts.topk = 40
-                sessionOpts.temperature = 0.8
-                let session = try LlmInference.Session(llmInference: inference, options: sessionOpts)
-                try session.addQueryChunk(inputText: LLMService.prompt)
-                let response = try session.generateResponse()
-                await MainActor.run { self.state = .ready(response: response) }
+                print("[ispy] model ready")
+                await MainActor.run {
+                    self.inference = inference
+                    self.state = .ready
+                }
             } catch {
-                await MainActor.run { self.state = .error(message: error.localizedDescription) }
+                let msg = error.localizedDescription
+                print("[ispy] load error: \(msg)")
+                if msg.contains("zip") || msg.contains("archive") || msg.contains("open") {
+                    try? FileManager.default.removeItem(atPath: path)
+                    await MainActor.run { self.state = .needsDownload }
+                } else {
+                    await MainActor.run { self.state = .error(message: msg) }
+                }
             }
         }
     }
@@ -71,7 +78,11 @@ extension LLMService: URLSessionDownloadDelegate {
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
         var r = request
-        r.setValue("Bearer \(LLMService.hfToken)", forHTTPHeaderField: "Authorization")
+        if r.url?.host?.contains("huggingface.co") == true {
+            r.setValue("Bearer \(LLMService.hfToken)", forHTTPHeaderField: "Authorization")
+        } else {
+            r.setValue(nil, forHTTPHeaderField: "Authorization")
+        }
         completionHandler(r)
     }
 
@@ -83,8 +94,7 @@ extension LLMService: URLSessionDownloadDelegate {
         totalBytesExpectedToWrite: Int64
     ) {
         let p = totalBytesExpectedToWrite > 0
-            ? Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
-            : 0
+            ? Double(totalBytesWritten) / Double(totalBytesExpectedToWrite) : 0
         Task { @MainActor in self.state = .downloading(progress: p) }
     }
 
@@ -93,6 +103,12 @@ extension LLMService: URLSessionDownloadDelegate {
         downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
+        if let http = downloadTask.response as? HTTPURLResponse, http.statusCode != 200 {
+            Task { @MainActor in
+                self.state = .error(message: "HTTP \(http.statusCode) — check token and model access")
+            }
+            return
+        }
         let dest = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(LLMService.modelFileName)
         do {
@@ -100,7 +116,7 @@ extension LLMService: URLSessionDownloadDelegate {
                 try FileManager.default.removeItem(at: dest)
             }
             try FileManager.default.moveItem(at: location, to: dest)
-            Task { @MainActor in self.loadAndRun() }
+            Task { @MainActor in self.loadModel() }
         } catch {
             Task { @MainActor in
                 self.state = .error(message: "Save failed: \(error.localizedDescription)")
