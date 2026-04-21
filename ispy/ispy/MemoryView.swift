@@ -17,9 +17,16 @@ struct MemoryView: View {
                     List(memoryStore.entries.reversed()) { entry in
                         Button { selectedEntry = entry } label: {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(entry.timestamp, format: .dateTime.day().month().hour().minute())
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                HStack {
+                                    Text(entry.timestamp, format: .dateTime.day().month().hour().minute())
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    if entry.dreamDescription != nil {
+                                        Image(systemName: "sparkles")
+                                            .font(.caption2)
+                                            .foregroundStyle(.purple)
+                                    }
+                                }
                                 Text(entry.description.components(separatedBy: .newlines).first ?? "")
                                     .lineLimit(2)
                                     .foregroundStyle(.primary)
@@ -55,6 +62,17 @@ struct MemoryDetailView: View {
                     Text(entry.description)
                 }
                 .padding(.horizontal)
+
+                if let dream = entry.dreamDescription {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Dream", systemImage: "sparkles")
+                            .font(.caption)
+                            .foregroundStyle(.purple)
+                        Text(dream)
+                    }
+                    .padding(.horizontal)
+                }
             }
         }
     }
