@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 
 struct CaptureView: View {
+    let gemmaService: GemmaVisionService
     let memoryStore: MemoryStore
 
     @State private var selectedImage: UIImage?
@@ -12,11 +13,11 @@ struct CaptureView: View {
     @State private var errorMessage: String?
     @State private var saved = false
 
-    private let quickVision = QuickVisionService()
-
     var body: some View {
         NavigationStack {
             VStack(spacing: 20) {
+                modelStatusBanner
+
                 if let image = selectedImage {
                     Image(uiImage: image)
                         .resizable()
@@ -25,13 +26,14 @@ struct CaptureView: View {
                         .cornerRadius(8)
 
                     if isAnalyzing {
-                        ProgressView("Scanning...")
+                        ProgressView("Analyzing with Gemma 4…")
                     } else if let desc = description {
                         resultView(image: image, desc: desc)
                     } else {
                         HStack(spacing: 16) {
                             Button("Analyze") { analyze(image: image) }
                                 .buttonStyle(.borderedProminent)
+                                .disabled(!gemmaService.state.isReady)
                             Button("Clear") { clearAll() }
                                 .buttonStyle(.bordered)
                         }
@@ -71,6 +73,45 @@ struct CaptureView: View {
     }
 
     // MARK: - Subviews
+
+    @ViewBuilder
+    private var modelStatusBanner: some View {
+        switch gemmaService.state {
+        case .needsDownload:
+            VStack(spacing: 8) {
+                Text("Gemma 4 needed for image analysis")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Download Gemma 4 (~2.6 GB)") {
+                    Task { await gemmaService.download() }
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding(.vertical, 4)
+        case .downloading:
+            VStack(spacing: 4) {
+                ProgressView(value: gemmaService.downloadProgress)
+                    .padding(.horizontal)
+                Text("Downloading Gemma 4… \(Int(gemmaService.downloadProgress * 100))%")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        case .loading:
+            HStack(spacing: 6) {
+                ProgressView().scaleEffect(0.7)
+                Text("Loading Gemma 4…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        case .error(let msg):
+            Text("Error: \(msg)")
+                .font(.caption)
+                .foregroundStyle(.red)
+                .multilineTextAlignment(.center)
+        case .ready:
+            EmptyView()
+        }
+    }
 
     private var pickerButtons: some View {
         HStack(spacing: 32) {
@@ -117,11 +158,11 @@ struct CaptureView: View {
         isAnalyzing = true
         errorMessage = nil
         Task {
-            let result = await Task.detached(priority: .userInitiated) {
-                (try? self.quickVision.analyze(image: image))?.structuredDescription
-                    ?? "No specific subjects detected."
-            }.value
-            description = result
+            do {
+                description = try await gemmaService.describe(image: image)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
             isAnalyzing = false
         }
     }

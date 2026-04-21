@@ -13,9 +13,9 @@ final class LLMService: NSObject {
         case error(message: String)
     }
 
-    nonisolated static let modelFileName = "gemma-3n-E2B-it-int4.task"
+    nonisolated static let modelFileName = "gemma-4-E2B-it-int4.task"
     nonisolated static let modelURL = URL(string:
-        "https://huggingface.co/google/gemma-3n-E2B-it-litert-preview/resolve/main/gemma-3n-E2B-it-int4.task"
+        "https://huggingface.co/google/gemma-4-E2B-it-litert-preview/resolve/main/gemma-4-E2B-it-int4.task"
     )!
     nonisolated static let hfToken = "REMOVED_HF_TOKEN"
 

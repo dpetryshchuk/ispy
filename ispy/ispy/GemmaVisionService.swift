@@ -1,0 +1,84 @@
+import Foundation
+import LiteRTLMSwift
+import UIKit
+
+@Observable
+@MainActor
+final class GemmaVisionService {
+    enum State: Equatable {
+        case needsDownload
+        case downloading
+        case loading
+        case ready
+        case error(String)
+
+        var isReady: Bool { self == .ready }
+    }
+
+    var state: State = .needsDownload
+    var downloadProgress: Double = 0
+    private let downloader = ModelDownloader()
+    private var engine: LiteRTLMEngine?
+
+    func start() async {
+        if downloader.isDownloaded {
+            await loadModel()
+        }
+    }
+
+    func download() async {
+        state = .downloading
+        downloadProgress = 0
+        let progressTask = Task {
+            while !Task.isCancelled {
+                downloadProgress = downloader.progress
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+        }
+        do {
+            try await downloader.download()
+            progressTask.cancel()
+            downloadProgress = 1
+            await loadModel()
+        } catch {
+            progressTask.cancel()
+            state = .error(error.localizedDescription)
+        }
+    }
+
+    private func loadModel() async {
+        state = .loading
+        let e = LiteRTLMEngine(modelPath: downloader.modelPath, backend: "gpu")
+        do {
+            try await e.load()
+            engine = e
+            state = .ready
+        } catch {
+            state = .error(error.localizedDescription)
+        }
+    }
+
+    func describe(image: UIImage) async throws -> String {
+        guard let engine, state == .ready else { throw GemmaVisionError.notLoaded }
+        guard let imageData = image.jpegData(compressionQuality: 0.85) else {
+            throw GemmaVisionError.invalidImage
+        }
+        return try await engine.vision(
+            imageData: imageData,
+            prompt: "Describe this image in detail. Include the main subject, setting, mood, and any notable details.",
+            maxTokens: 400
+        )
+    }
+}
+
+enum GemmaVisionError: LocalizedError {
+    case notLoaded
+    case invalidImage
+
+    var errorDescription: String? {
+        switch self {
+        case .notLoaded: return "Model not ready"
+        case .invalidImage: return "Could not process image"
+        }
+    }
+}
