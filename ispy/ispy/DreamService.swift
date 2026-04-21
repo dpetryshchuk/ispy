@@ -1,27 +1,95 @@
 import Foundation
-import MediaPipeTasksGenAI
+import BackgroundTasks
 
+@Observable
+@MainActor
 final class DreamService {
-    private let inference: LlmInference
+    private(set) var isRunning = false
+    private(set) var lastError: String?
 
-    init(inference: LlmInference) {
-        self.inference = inference
+    private let wikiStore: WikiStore
+    private let log: DreamLog
+    private let gemmaService: GemmaVisionService
+
+    init(wikiStore: WikiStore, log: DreamLog, gemmaService: GemmaVisionService) {
+        self.wikiStore = wikiStore
+        self.log = log
+        self.gemmaService = gemmaService
     }
 
-    func describe(visionData: String) throws -> String {
-        let sessionOpts = LlmInference.Session.Options()
-        sessionOpts.topk = 40
-        sessionOpts.temperature = 0.9
-        let session = try LlmInference.Session(llmInference: inference, options: sessionOpts)
-        let prompt = """
-        You are ispy, a personal AI that helps build memories from photos.
+    func dream(memoryStore: MemoryStore) async {
+        guard !isRunning else { return }
+        guard gemmaService.state == .ready, let engine = gemmaService.engine else {
+            lastError = "Gemma model not loaded — open Capture tab and load the model first"
+            return
+        }
 
-        On-device vision analysis detected the following in a photo:
-        \(visionData)
+        isRunning = true
+        lastError = nil
+        log.clear()
+        defer { isRunning = false }
 
-        Write a vivid, specific 2-4 sentence description of what this image likely shows. Be concrete about the main subject, setting, and atmosphere. Focus on what makes this moment memorable.
-        """
-        try session.addQueryChunk(inputText: prompt)
-        return try session.generateResponse()
+        do {
+            let captures = unprocessedCaptures(memoryStore: memoryStore)
+            guard !captures.isEmpty else {
+                await log.append("No new memories to process")
+                return
+            }
+
+            let entropyPages = selectEntropyPages(limit: 2)
+            for page in entropyPages {
+                await log.append("Surfacing old memory: \(page)")
+            }
+
+            let agent = DreamAgent(engine: engine, wikiStore: wikiStore, log: log)
+            try await agent.run(captures: captures, entropyPages: entropyPages)
+            try wikiStore.markDreamed()
+        } catch {
+            lastError = error.localizedDescription
+            await log.append("Error: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - BGProcessingTask
+
+    static let bgTaskIdentifier = "com.ispy.dream"
+
+    func registerBackgroundTask() {
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: Self.bgTaskIdentifier, using: nil
+        ) { [weak self] task in
+            guard let self, let task = task as? BGProcessingTask else {
+                task.setTaskCompleted(success: false)
+                return
+            }
+            Task { @MainActor in
+                let memoryStore = MemoryStore()
+                await self.dream(memoryStore: memoryStore)
+                task.setTaskCompleted(success: self.lastError == nil)
+                self.scheduleNextDream()
+            }
+            task.expirationHandler = { task.setTaskCompleted(success: false) }
+        }
+    }
+
+    func scheduleNextDream() {
+        let request = BGProcessingTaskRequest(identifier: Self.bgTaskIdentifier)
+        request.requiresNetworkConnectivity = false
+        request.requiresExternalPower = true
+        request.earliestBeginDate = Calendar.current.date(byAdding: .hour, value: 22, to: Date())
+        try? BGTaskScheduler.shared.submit(request)
+    }
+
+    // MARK: - Private
+
+    private func unprocessedCaptures(memoryStore: MemoryStore) -> [MemoryEntry] {
+        let cursor = wikiStore.lastDreamed ?? .distantPast
+        return memoryStore.entries.filter { $0.timestamp > cursor }
+    }
+
+    private func selectEntropyPages(limit: Int) -> [String] {
+        let pages = wikiStore.oldestCachePages(limit: limit * 3)
+        guard !pages.isEmpty else { return [] }
+        return Array(pages.shuffled().prefix(limit))
     }
 }

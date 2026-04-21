@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct MemoryView: View {
     let memoryStore: MemoryStore
@@ -8,70 +9,75 @@ struct MemoryView: View {
         NavigationStack {
             Group {
                 if memoryStore.entries.isEmpty {
-                    ContentUnavailableView(
-                        "No memories yet",
-                        systemImage: "brain",
-                        description: Text("Capture and analyze a photo to create your first memory.")
-                    )
+                    emptyView
                 } else {
-                    List(memoryStore.entries.reversed()) { entry in
-                        Button { selectedEntry = entry } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(entry.timestamp, format: .dateTime.day().month().hour().minute())
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    if entry.dreamDescription != nil {
-                                        Image(systemName: "sparkles")
-                                            .font(.caption2)
-                                            .foregroundStyle(.purple)
-                                    }
-                                }
-                                Text(entry.description.components(separatedBy: .newlines).first ?? "")
-                                    .lineLimit(2)
-                                    .foregroundStyle(.primary)
-                            }
-                        }
-                    }
+                    listView
                 }
             }
             .navigationTitle("Memory")
             .sheet(item: $selectedEntry) { entry in
-                MemoryDetailView(entry: entry, photoURL: memoryStore.photoURL(for: entry))
+                MemoryDetailView(entry: entry, photoURL: memoryStore.photoURL(for: entry)) {
+                    try? memoryStore.delete(id: entry.id)
+                    selectedEntry = nil
+                }
             }
         }
+    }
+
+    private var emptyView: some View {
+        ContentUnavailableView("No memories", systemImage: "brain", description: Text("Capture a photo."))
+    }
+
+    private var listView: some View {
+        List {
+            ForEach(Array(memoryStore.entries.reversed())) { entry in
+                Button { selectedEntry = entry } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(entry.timestamp, format: .dateTime.day().month().hour().minute())
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(entry.description.components(separatedBy: .newlines).first ?? "")
+                            .lineLimit(2)
+                    }
+                }
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) { try? memoryStore.delete(id: entry.id) } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+            }
+        }
+        .listStyle(.plain)
     }
 }
 
 struct MemoryDetailView: View {
     let entry: MemoryEntry
     let photoURL: URL
+    let onDelete: () -> Void
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                if let image = UIImage(contentsOfFile: photoURL.path) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(entry.timestamp, format: .dateTime.weekday().day().month().year().hour().minute())
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(entry.description)
-                }
-                .padding(.horizontal)
-
-                if let dream = entry.dreamDescription {
-                    Divider()
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label("Dream", systemImage: "sparkles")
-                            .font(.caption)
-                            .foregroundStyle(.purple)
-                        Text(dream)
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if let image = UIImage(contentsOfFile: photoURL.path) {
+                        Image(uiImage: image).resizable().scaledToFit()
                     }
-                    .padding(.horizontal)
+                    Text(entry.timestamp, format: .dateTime.weekday().day().month().year().hour().minute())
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text(entry.description)
+                    if let dream = entry.dreamDescription {
+                        Text(dream).foregroundStyle(.secondary)
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Memory")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .destructiveAction) {
+                    Button(role: .destructive, action: onDelete) { Image(systemName: "trash") }
                 }
             }
         }

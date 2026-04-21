@@ -18,7 +18,7 @@ final class GemmaVisionService {
     var state: State = .needsDownload
     var downloadProgress: Double = 0
     private let downloader = ModelDownloader()
-    private var engine: LiteRTLMEngine?
+    var engine: LiteRTLMEngine?
 
     func start() async {
         if downloader.isDownloaded {

@@ -1,0 +1,135 @@
+// swift-interface-format-version: 1.0
+// swift-compiler-version: Apple Swift version 6.1.2 effective-5.10 (swiftlang-6.1.2.1.2 clang-1700.0.13.5)
+// swift-module-flags: -target arm64-apple-ios15.0 -enable-objc-interop -enable-library-evolution -O -enable-experimental-feature AccessLevelOnImport -enable-upcoming-feature BareSlashRegexLiterals -module-name MediaPipeTasksGenAI -package-name third_party/mediapipe/tasks/ios/genai/inference
+// swift-module-flags-ignorable: -no-verify-emitted-module-interface -interface-compiler-version 6.1.2
+import CoreGraphics
+import Foundation
+import MediaPipeTasksGenAIC
+import Swift
+import _Concurrency
+import _StringProcessing
+import _SwiftConcurrencyShims
+@available(*, deprecated, message: "Migrate to LiteRT LM instead. For more details, refer to LiteRT LM on GitHub: https://github.com/google-ai-edge/LiteRT-LM")
+@objc(MPPLLMInference) final public class LlmInference : ObjectiveC.NSObject {
+  final public var metrics: MediaPipeTasksGenAI.LlmInference.Metrics {
+    get
+  }
+  @objc public init(options: MediaPipeTasksGenAI.LlmInference.Options) throws
+  @objc convenience public init(modelPath: Swift.String) throws
+  @objc final public func generateResponse(inputText: Swift.String) throws -> Swift.String
+  @objc final public func generateResponseAsync(inputText: Swift.String, progress: @escaping (_ partialResponse: Swift.String?, _ error: (any Swift.Error)?) -> Swift.Void, completion: @escaping () -> Swift.Void) throws
+  @available(iOS 13, macOS 10.15, tvOS 13, watchOS 6, *)
+  final public func generateResponseAsync(inputText: Swift.String) -> _Concurrency.AsyncThrowingStream<Swift.String, any Swift.Error>
+  @objc deinit
+}
+extension MediaPipeTasksGenAI.LlmInference {
+  @objc public enum LlmPreferredBackend : Swift.Int32 {
+    case defaultBackend = 0
+    case gpu = 1
+    case cpu = 2
+    public init?(rawValue: Swift.Int32)
+    @available(*, deprecated, message: "Migrate to LiteRT LM instead. For more details, refer to LiteRT LM on GitHub: https://github.com/google-ai-edge/LiteRT-LM")
+    public typealias RawValue = Swift.Int32
+    public var rawValue: Swift.Int32 {
+      get
+    }
+  }
+  @available(*, deprecated, message: "Migrate to LiteRT LM instead. For more details, refer to LiteRT LM on GitHub: https://github.com/google-ai-edge/LiteRT-LM")
+  @objc(MPPLLMInferenceOptions) final public class Options : ObjectiveC.NSObject {
+    @objc final public var modelPath: Swift.String
+    @objc final public var visionEncoderPath: Swift.String
+    @objc final public var visionAdapterPath: Swift.String
+    @objc final public var preferredBackend: MediaPipeTasksGenAI.LlmInference.LlmPreferredBackend
+    @objc final public var maxTokens: Swift.Int
+    @objc final public var maxImages: Swift.Int
+    @objc final public var maxTopk: Swift.Int
+    @objc final public var supportedLoraRanks: [Swift.Int]
+    @objc final public var waitForWeightUploads: Swift.Bool
+    @objc final public var useSubmodel: Swift.Bool
+    @objc final public var sequenceBatchSize: Swift.Int
+    @objc final public var maxAudioSequenceLength: Swift.Int
+    @objc final public var enableAudioModality: Swift.Bool
+    @objc public init(modelPath: Swift.String)
+    @objc deinit
+  }
+}
+extension MediaPipeTasksGenAI.LlmInference {
+  @objc(MPPLLMInferenceMetrics) final public class Metrics : ObjectiveC.NSObject {
+    @objc final public let initializationTimeInSeconds: Foundation.TimeInterval
+    @objc public init(initializationTimeInSeconds: Foundation.TimeInterval)
+    @objc deinit
+  }
+}
+extension MediaPipeTasksGenAI.LlmInference {
+  @_hasMissingDesignatedInitializers @available(*, deprecated, message: "Migrate to LiteRT LM instead: https://github.com/google-ai-edge/LiteRT-LM")
+  @objc(MPPLLMInferenceSession) final public class Session : ObjectiveC.NSObject {
+    final public var metrics: MediaPipeTasksGenAI.LlmInference.Session.Metrics {
+      get
+    }
+    @objc public init(llmInference: MediaPipeTasksGenAI.LlmInference, options: MediaPipeTasksGenAI.LlmInference.Session.Options) throws
+    @objc convenience public init(llmInference: MediaPipeTasksGenAI.LlmInference) throws
+    @objc final public func addQueryChunk(inputText: Swift.String) throws
+    @objc final public func addImage(image: CoreGraphics.CGImage) throws
+    @objc final public func addAudio(audio: Foundation.Data) throws
+    @objc final public func generateResponse() throws -> Swift.String
+    @objc final public func generateResponseAsync(progress: @escaping (_ partialResponse: Swift.String?, _ error: (any Swift.Error)?) -> Swift.Void, completion: @escaping () -> Swift.Void) throws
+    @available(iOS 13, macOS 10.15, tvOS 13, watchOS 6, *)
+    final public func generateResponseAsync() -> _Concurrency.AsyncThrowingStream<Swift.String, any Swift.Error>
+    final public func sizeInTokens(text: Swift.String) throws -> Swift.Int
+    final public func clone() throws -> MediaPipeTasksGenAI.LlmInference.Session
+    final public func cancelGenerateResponseAsync() throws
+    @objc deinit
+  }
+}
+extension MediaPipeTasksGenAI.LlmInference.Session {
+  @_inheritsConvenienceInitializers @available(*, deprecated, message: "Migrate to LiteRT LM instead. For more details, refer to LiteRT LM on GitHub: https://github.com/google-ai-edge/LiteRT-LM")
+  @objc(MPPLLMInferenceSessionOptions) final public class Options : ObjectiveC.NSObject {
+    @objc final public var topk: Swift.Int
+    @objc final public var topp: Swift.Float
+    @objc final public var temperature: Swift.Float
+    @objc final public var randomSeed: Swift.Int
+    @objc final public var loraPath: Swift.String?
+    @objc final public var enableVisionModality: Swift.Bool
+    @objc final public var enableAudioModality: Swift.Bool
+    @objc override dynamic public init()
+    @objc deinit
+  }
+}
+extension MediaPipeTasksGenAI.LlmInference.Session {
+  @objc(MPPLLMInferenceSessionMetrics) final public class Metrics : ObjectiveC.NSObject {
+    @objc final public var responseGenerationTimeInSeconds: Foundation.TimeInterval {
+      get
+    }
+    @objc public init(responseGenerationTimeInSeconds: Foundation.TimeInterval)
+    @objc deinit
+  }
+}
+public enum GenAiInferenceError : Swift.Error {
+  case invalidResponse
+  case illegalMethodCall
+  case failedToComputeSizeInTokens(Swift.String?)
+  case failedToInitializeSession(Swift.String?)
+  case failedToInitializeEngine(Swift.String?)
+  case failedToAddQueryToSession(Swift.String, Swift.String?)
+  case failedToAddAudioToSession(Swift.String?)
+  case failedToPredictSync(Swift.String?)
+  case failedToPredictAsync(Swift.String?)
+  case failedToCloneSession(Swift.String?)
+  case failedToCancelAsyncPrediction(Swift.String?)
+}
+extension MediaPipeTasksGenAI.GenAiInferenceError : Foundation.LocalizedError {
+  public var errorDescription: Swift.String? {
+    get
+  }
+}
+extension MediaPipeTasksGenAI.GenAiInferenceError : Foundation.CustomNSError {
+  public static var errorDomain: Swift.String {
+    get
+  }
+  public var errorCode: Swift.Int {
+    get
+  }
+}
+extension MediaPipeTasksGenAI.LlmInference.LlmPreferredBackend : Swift.Equatable {}
+extension MediaPipeTasksGenAI.LlmInference.LlmPreferredBackend : Swift.Hashable {}
+extension MediaPipeTasksGenAI.LlmInference.LlmPreferredBackend : Swift.RawRepresentable {}
