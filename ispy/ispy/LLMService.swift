@@ -7,6 +7,7 @@ final class LLMService: NSObject {
     enum State {
         case needsDownload
         case downloading(progress: Double)
+        case idle           // model on disk, not in memory
         case loading
         case ready
         case error(message: String)
@@ -26,10 +27,12 @@ final class LLMService: NSObject {
             .appendingPathComponent(Self.modelFileName)
     }
 
+    var modelIsDownloaded: Bool {
+        FileManager.default.fileExists(atPath: modelPath.path)
+    }
+
     func start() {
-        if FileManager.default.fileExists(atPath: modelPath.path) {
-            loadModel()
-        }
+        state = modelIsDownloaded ? .idle : .needsDownload
     }
 
     func download() {
@@ -41,6 +44,7 @@ final class LLMService: NSObject {
     }
 
     func loadModel() {
+        guard case .idle = state else { return }
         state = .loading
         let path = modelPath.path
         Task.detached(priority: .userInitiated) {
@@ -48,7 +52,6 @@ final class LLMService: NSObject {
                 print("[ispy] loading model at \(path)")
                 let options = LlmInference.Options(modelPath: path)
                 options.maxTokens = 1024
-                options.maxImages = 1
                 let inference = try LlmInference(options: options)
                 print("[ispy] model ready")
                 await MainActor.run {
@@ -66,6 +69,12 @@ final class LLMService: NSObject {
                 }
             }
         }
+    }
+
+    func unloadModel() {
+        inference = nil
+        state = modelIsDownloaded ? .idle : .needsDownload
+        print("[ispy] model unloaded")
     }
 }
 
@@ -116,7 +125,7 @@ extension LLMService: URLSessionDownloadDelegate {
                 try FileManager.default.removeItem(at: dest)
             }
             try FileManager.default.moveItem(at: location, to: dest)
-            Task { @MainActor in self.loadModel() }
+            Task { @MainActor in self.state = .idle }
         } catch {
             Task { @MainActor in
                 self.state = .error(message: "Save failed: \(error.localizedDescription)")
