@@ -4,12 +4,14 @@ import UIKit
 struct MemoryEntry: Codable, Identifiable {
     let id: UUID
     let timestamp: Date
-    let description: String
+    var description: String
     let photoFilename: String
+    var dreamDescription: String?
 }
 
 enum MemoryError: Error {
     case invalidImage
+    case entryNotFound
 }
 
 @Observable
@@ -37,6 +39,14 @@ final class MemoryStore {
         try data.write(to: photosDir.appendingPathComponent(filename))
         let entry = MemoryEntry(id: id, timestamp: Date(), description: description, photoFilename: filename)
         entries.append(entry)
+        try writeIndex()
+    }
+
+    func updateDream(id: UUID, dreamDescription: String) throws {
+        guard let idx = entries.firstIndex(where: { $0.id == id }) else {
+            throw MemoryError.entryNotFound
+        }
+        entries[idx].dreamDescription = dreamDescription
         try writeIndex()
     }
 
