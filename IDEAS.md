@@ -1,5 +1,8 @@
 # ispy — ideas backlog
 
+# ui/ux
+downloading the ai model is like giving fire to clay.
+
 ## personality evolution
 - ispy has a `personality.md` file in its virtual filesystem
 - a second AI pass reads recent log entries and edits that file to reflect evolving character traits, speech patterns, opinions

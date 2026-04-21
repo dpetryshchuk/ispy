@@ -8,15 +8,18 @@ final class DreamService {
         self.inference = inference
     }
 
-    func describe(quickDescription: String) throws -> String {
+    func describe(visionData: String) throws -> String {
         let sessionOpts = LlmInference.Session.Options()
         sessionOpts.topk = 40
         sessionOpts.temperature = 0.9
         let session = try LlmInference.Session(llmInference: inference, options: sessionOpts)
         let prompt = """
-        You are ispy, a personal AI witness. A photo was captured and quick on-device analysis detected: \(quickDescription)
+        You are ispy, a personal AI that helps build memories from photos.
 
-        Write a vivid, specific 2-3 sentence description of this moment. Focus on what it reveals about the person, place, or atmosphere. Be concrete, not generic.
+        On-device vision analysis detected the following in a photo:
+        \(visionData)
+
+        Write a vivid, specific 2-4 sentence description of what this image likely shows. Be concrete about the main subject, setting, and atmosphere. Focus on what makes this moment memorable.
         """
         try session.addQueryChunk(inputText: prompt)
         return try session.generateResponse()

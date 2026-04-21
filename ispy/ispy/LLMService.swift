@@ -51,7 +51,7 @@ final class LLMService: NSObject {
             do {
                 print("[ispy] loading model at \(path)")
                 let options = LlmInference.Options(modelPath: path)
-                options.maxTokens = 1024
+                options.maxTokens = 4096
                 let inference = try LlmInference(options: options)
                 print("[ispy] model ready")
                 await MainActor.run {
