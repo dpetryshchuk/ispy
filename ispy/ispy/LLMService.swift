@@ -17,7 +17,7 @@ final class LLMService: NSObject {
     nonisolated static let modelURL = URL(string:
         "https://huggingface.co/google/gemma-4-E2B-it-litert-preview/resolve/main/gemma-4-E2B-it-int4.task"
     )!
-    nonisolated static let hfToken = "REMOVED_HF_TOKEN"
+    nonisolated static let hfToken = Secrets.hfToken
 
     var state: State = .needsDownload
     private(set) var inference: LlmInference?
