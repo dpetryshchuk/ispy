@@ -4,7 +4,7 @@ import MediaPipeTasksGenAI
 @Observable
 @MainActor
 final class LLMService: NSObject {
-    enum State {
+    enum State: Equatable {
         case needsDownload
         case downloading(progress: Double)
         case idle           // model on disk, not in memory
