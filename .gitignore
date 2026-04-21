@@ -47,3 +47,14 @@ app.*.map.json
 # Secrets — never commit
 .env
 ispy/ispy/Secrets.swift
+
+# Xcode / iOS
+ispy/Pods/
+ispy/*.xcworkspace/xcuserdata/
+ispy/ispy.xcodeproj/xcuserdata/
+ispy/ispy.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Nested repos / experiments
+google-ai-edge-gallery/
+ml-fastvlm/
+wiki.md
