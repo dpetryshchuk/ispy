@@ -48,13 +48,20 @@ final class GemmaVisionService {
 
     private func loadModel() async {
         state = .loading
-        let e = LiteRTLMEngine(modelPath: downloader.modelPath, backend: "gpu")
-        do {
-            try await e.load()
-            engine = e
-            state = .ready
-        } catch {
-            state = .error(error.localizedDescription)
+        // Try GPU first, fall back to CPU if engine creation fails
+        for backend in ["gpu", "cpu"] {
+            let e = LiteRTLMEngine(modelPath: downloader.modelPath, backend: backend)
+            do {
+                try await e.load()
+                engine = e
+                state = .ready
+                return
+            } catch {
+                if backend == "cpu" {
+                    state = .error(error.localizedDescription)
+                }
+                // else try next backend
+            }
         }
     }
 
