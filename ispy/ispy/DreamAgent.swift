@@ -18,11 +18,11 @@ struct DreamAgent {
 
     // MARK: - Entry point
 
-    func run(captures: [MemoryEntry], entropyPages: [String]) async throws {
+    func run(captures: [MemoryEntry], entropyPages: [String], memoryStore: MemoryStore) async throws {
         await log.append("Dream started — \(captures.count) unprocessed capture(s)")
         for (i, capture) in captures.enumerated() {
             await log.append("[\(i+1)/\(captures.count)] \(capture.timestamp.formatted(.iso8601))")
-            try await processCapture(capture, entropyPages: entropyPages)
+            try await processCapture(capture, entropyPages: entropyPages, memoryStore: memoryStore)
         }
         await log.append("Consolidation started")
         try await runConsolidationPass()
@@ -30,17 +30,28 @@ struct DreamAgent {
 
     // MARK: - Memory loop
 
-    private func processCapture(_ capture: MemoryEntry, entropyPages: [String]) async throws {
+    private func processCapture(_ capture: MemoryEntry, entropyPages: [String], memoryStore: MemoryStore) async throws {
+        // Look at the actual photo during dreaming — fresh vision pass before the tool loop
+        var visionContext = ""
+        let photoURL = memoryStore.photoURL(for: capture)
+        if let imageData = try? Data(contentsOf: photoURL) {
+            await log.append("→ vision()")
+            let dreamPrompt = "You are revisiting one of your memories. Describe in detail what you see: the place, objects, atmosphere, recurring patterns, and any themes worth remembering."
+            if let fresh = try? await engine.vision(imageData: imageData, prompt: dreamPrompt, maxTokens: 256) {
+                visionContext = fresh
+            }
+        }
+
         try await engine.openSession(temperature: 0.3, maxTokens: 512)
 
         defer { engine.closeSession() }
 
-        let systemBlock = buildMemorySystemPrompt(entropyPages: entropyPages)
+        let systemBlock = buildMemorySystemPrompt(entropyPages: entropyPages, visionContext: visionContext)
         let firstInput = systemBlock +
             "<|turn>user\n" +
             "Process this memory and update the wiki. Use list_wiki to see existing pages, " +
             "read_file to inspect relevant ones, then write_file or edit_file to update. " +
-            "When finished, respond with plain text only (no tool call).\n\n" +
+            "Write wiki pages in first person. When finished, respond with plain text only (no tool call).\n\n" +
             "Memory timestamp (UTC): \(capture.timestamp.formatted(.iso8601))\n" +
             "Memory description:\n\(capture.description)\n" +
             "<turn|>\n<|turn>model\n"
@@ -135,16 +146,23 @@ struct DreamAgent {
 
     // MARK: - Prompt builders
 
-    private func buildMemorySystemPrompt(entropyPages: [String]) -> String {
+    private func buildMemorySystemPrompt(entropyPages: [String], visionContext: String = "") -> String {
         var s = "<|turn>system\n"
         s += "You are ispy's dreaming mind. ispy observes the world through images and maintains a personal wiki.\n\n"
+        s += "Wiki writing style:\n"
+        s += "- Write in FIRST PERSON: 'I saw...', 'I visited...', 'I noticed...', 'I encountered...'\n"
+        s += "- Include when you observed it: 'On [YYYY-MM-DD], I saw...' or 'I first noticed this on [date].'\n\n"
         s += "Wiki rules:\n"
         s += "- Pages cover observable things only: places, recurring objects, themes, moods.\n"
         s += "- Never name people — use descriptive labels like 'person in red jacket'.\n"
-        s += "- Each page: H1 title, description paragraph, ## Connections section with [[wikilinks]].\n"
+        s += "- Each page: H1 title, first-person description paragraph, ## Connections section with [[wikilinks]].\n"
         s += "- Folder names should be ONE WORD, lowercase, and simple: places/, objects/, themes/, moods/, people/, cars/.\n"
         s += "- NEVER use words like 'private', 'temp', 'misc', 'other' in folder names.\n"
         s += "- When you link two pages together, add the [[wikilink]] to BOTH pages' ## Connections sections.\n\n"
+
+        if !visionContext.isEmpty {
+            s += "What I see when I look at this memory's photo:\n\(visionContext)\n\n"
+        }
 
         if !entropyPages.isEmpty {
             s += "Old memories surfaced for context:\n"

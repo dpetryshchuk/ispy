@@ -2,6 +2,4 @@ platform :ios, '17.0'
 
 target 'ispy' do
   use_frameworks!
-  pod 'MediaPipeTasksGenAI'
-  pod 'MediaPipeTasksGenAIC'
 end
