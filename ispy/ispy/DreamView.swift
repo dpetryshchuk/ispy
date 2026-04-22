@@ -12,7 +12,7 @@ struct DreamView: View {
                     .padding()
 
                 if dreamLog.entries.isEmpty {
-                    emptyState
+                    pastSessionsView
                 } else {
                     logView
                 }
@@ -46,12 +46,34 @@ struct DreamView: View {
         }
     }
 
-    private var emptyState: some View {
-        ContentUnavailableView(
-            "No dream yet",
-            systemImage: "moon.stars",
-            description: Text("Tap Dream to start.")
-        )
+    private var pastSessionsView: some View {
+        let sessions = dreamLog.savedSessions()
+        return Group {
+            if sessions.isEmpty {
+                ContentUnavailableView(
+                    "No dream yet",
+                    systemImage: "moon.stars",
+                    description: Text("Tap Dream to start.")
+                )
+            } else {
+                List {
+                    ForEach(sessions) { session in
+                        NavigationLink {
+                            DreamSessionView(session: session)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(session.startedAt, format: .dateTime.weekday().day().month().year())
+                                    .font(.subheadline)
+                                Text(session.startedAt, format: .dateTime.hour().minute())
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                .listStyle(.plain)
+            }
+        }
     }
 
     private var logView: some View {
@@ -75,5 +97,32 @@ struct DreamView: View {
                 }
             }
         }
+    }
+}
+
+struct DreamSessionView: View {
+    let session: DreamSession
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 2) {
+                ForEach(session.entries, id: \.timestamp) { entry in
+                    Text("[\(timeString(entry.timestamp))] \(entry.message)")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+        .navigationTitle(session.startedAt.formatted(.dateTime.weekday().day().month()))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func timeString(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f.string(from: date)
     }
 }

@@ -200,7 +200,8 @@ final class WikiStore {
                 let range = NSRange(content.startIndex..., in: content)
                 for m in regex.matches(in: content, range: range) {
                     if let r = Range(m.range(at: 1), in: content) {
-                        links.append(String(content[r]))
+                        let link = String(content[r])
+                        if !link.hasPrefix("memory:") { links.append(link) }
                     }
                 }
             }

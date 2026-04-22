@@ -44,7 +44,7 @@ struct RootView: View {
                 .tabItem { Label("Memory", systemImage: "brain") }
                 .tag(2)
 
-            WikiView(wikiStore: wikiStore)
+            WikiView(wikiStore: wikiStore, memoryStore: memoryStore)
                 .tabItem { Label("Wiki", systemImage: "folder") }
                 .tag(3)
 

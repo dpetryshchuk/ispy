@@ -9,6 +9,7 @@ func folderColor(_ folder: String) -> Color {
 
 struct WikiView: View {
     let wikiStore: WikiStore
+    let memoryStore: MemoryStore
     @State private var selectedPage: WikiPage?
     @State private var showGraph = false
 
@@ -31,7 +32,7 @@ struct WikiView: View {
             }
             .navigationTitle("Wiki")
             .sheet(item: $selectedPage) { page in
-                WikiPageView(page: page, wikiStore: wikiStore) { selectedPage = $0 }
+                WikiPageView(page: page, wikiStore: wikiStore, memoryStore: memoryStore) { selectedPage = $0 }
             }
         }
     }
@@ -261,8 +262,10 @@ struct GraphNodeView: View {
 struct WikiPageView: View {
     let page: WikiPage
     let wikiStore: WikiStore
+    let memoryStore: MemoryStore
     let onNavigate: (WikiPage) -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var selectedMemory: MemoryEntry?
 
     var body: some View {
         NavigationStack {
@@ -275,17 +278,28 @@ struct WikiPageView: View {
                             .foregroundStyle(folderColor(page.folder))
                     }
                     Text(page.title).font(.title2).bold()
-                    Text(fullContent).foregroundStyle(.primary)
+                    Text(displayContent).foregroundStyle(.primary)
                     if !page.links.isEmpty {
                         Divider()
                         Text("Connections").font(.caption).foregroundStyle(.secondary)
                         ForEach(page.links, id: \.self) { link in
-                            let clean = link
-                                .replacingOccurrences(of: "[[", with: "")
-                                .replacingOccurrences(of: "]]", with: "")
-                            if let target = findPage(clean) {
+                            if let target = findPage(link) {
                                 Button { onNavigate(target) } label: {
-                                    Label(clean, systemImage: "link")
+                                    Label(target.title, systemImage: "link")
+                                }
+                            }
+                        }
+                    }
+                    if !memoryLinks.isEmpty {
+                        Divider()
+                        Text("Sources").font(.caption).foregroundStyle(.secondary)
+                        ForEach(memoryLinks, id: \.self) { uuidStr in
+                            if let entry = findMemory(uuidStr) {
+                                Button { selectedMemory = entry } label: {
+                                    Label(
+                                        entry.timestamp.formatted(.dateTime.day().month().year().hour().minute()),
+                                        systemImage: "brain"
+                                    )
                                 }
                             }
                         }
@@ -298,10 +312,34 @@ struct WikiPageView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
             }
+            .sheet(item: $selectedMemory) { entry in
+                MemoryDetailView(entry: entry, photoURL: memoryStore.photoURL(for: entry)) {
+                    try? memoryStore.delete(id: entry.id)
+                    selectedMemory = nil
+                }
+            }
         }
     }
 
-    private var fullContent: String { wikiStore.readFile(path: page.path) }
+    private var rawContent: String { wikiStore.readFile(path: page.path) }
+
+    private var displayContent: String {
+        rawContent.replacingOccurrences(of: #"\[\[memory:[^\]]+\]\]"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var memoryLinks: [String] {
+        guard let re = try? NSRegularExpression(pattern: #"\[\[memory:([0-9A-Fa-f-]{36})\]\]"#) else { return [] }
+        let s = rawContent
+        return re.matches(in: s, range: NSRange(s.startIndex..., in: s)).compactMap { m in
+            Range(m.range(at: 1), in: s).map { String(s[$0]) }
+        }
+    }
+
+    private func findMemory(_ uuidStr: String) -> MemoryEntry? {
+        guard let uuid = UUID(uuidString: uuidStr) else { return nil }
+        return memoryStore.entries.first { $0.id == uuid }
+    }
 
     private func findPage(_ name: String) -> WikiPage? {
         let clean = name.trimmingCharacters(in: .whitespaces)

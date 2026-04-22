@@ -51,7 +51,10 @@ struct DreamAgent {
             "<|turn>user\n" +
             "Process this memory and update the wiki. Use list_wiki to see existing pages, " +
             "read_file to inspect relevant ones, then write_file or edit_file to update. " +
-            "Write wiki pages in first person. When finished, respond with plain text only (no tool call).\n\n" +
+            "Write wiki pages in first person. Add a ## Sources section containing [[memory:\(capture.id.uuidString)]] " +
+            "to every page you create or update for this memory. " +
+            "When finished, respond with plain text only (no tool call).\n\n" +
+            "Memory ID: \(capture.id.uuidString)\n" +
             "Memory timestamp (UTC): \(capture.timestamp.formatted(.iso8601))\n" +
             "Memory description:\n\(capture.description)\n" +
             "<turn|>\n<|turn>model\n"
@@ -161,7 +164,7 @@ struct DreamAgent {
         s += "Wiki rules:\n"
         s += "- Pages cover observable things only: places, recurring objects, themes, moods.\n"
         s += "- Never name people — use descriptive labels like 'person in red jacket'.\n"
-        s += "- Each page: H1 title, first-person description paragraph, ## Connections section with [[wikilinks]].\n"
+        s += "- Each page: H1 title, first-person description paragraph, ## Connections section with [[wikilinks]], ## Sources section with [[memory:UUID]] links.\n"
         s += "- Folder names should be ONE WORD, lowercase, and simple: places/, objects/, themes/, moods/, people/, cars/.\n"
         s += "- NEVER use words like 'private', 'temp', 'misc', 'other' in folder names.\n"
         s += "- When you link two pages together, add the [[wikilink]] to BOTH pages' ## Connections sections.\n\n"

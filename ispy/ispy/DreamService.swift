@@ -48,6 +48,7 @@ final class DreamService {
             lastError = error.localizedDescription
             await log.append("Error: \(error.localizedDescription)")
         }
+        log.save()
     }
 
     // MARK: - BGProcessingTask
