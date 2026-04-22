@@ -57,7 +57,13 @@ final class WikiStore {
     }
 
     func oldestCachePages(limit: Int) -> [String] {
-        Array(cacheEntries().sorted { $0.lastSeen < $1.lastSeen }.prefix(limit).map(\.page))
+        Array(
+            cacheEntries()
+                .sorted { $0.lastSeen < $1.lastSeen }
+                .map(\.page)
+                .filter { FileManager.default.fileExists(atPath: wikiDir.appendingPathComponent($0).path) }
+                .prefix(limit)
+        )
     }
 
     private func touchCache(page: String) {
@@ -78,6 +84,7 @@ final class WikiStore {
     // MARK: - Tool: list_wiki
 
     func listWiki() -> String {
+        updateWikiIndex()
         let url = wikiDir.appendingPathComponent("index.md")
         return (try? String(contentsOf: url, encoding: .utf8)) ?? "(empty wiki)"
     }
@@ -132,11 +139,14 @@ final class WikiStore {
         ) else { return "(no results)" }
         let lower = query.lowercased()
         var results: [String] = []
+        let base = wikiDir.standardizedFileURL.path + "/"
         for case let url as URL in enumerator {
             guard url.pathExtension == "md",
                   let content = try? String(contentsOf: url, encoding: .utf8),
                   content.lowercased().contains(lower) else { continue }
-            let rel = url.path.replacingOccurrences(of: wikiDir.path + "/", with: "")
+            let p = url.standardizedFileURL.path
+            guard p.hasPrefix(base) else { continue }
+            let rel = String(p.dropFirst(base.count))
             let snippet = content.components(separatedBy: .newlines).first { !$0.isEmpty } ?? ""
             results.append("\(rel): \(snippet)")
         }
@@ -171,6 +181,7 @@ final class WikiStore {
         guard let enumerator = FileManager.default.enumerator(
             at: wikiDir, includingPropertiesForKeys: nil
         ) else { return [] }
+        let base = wikiDir.standardizedFileURL.path + "/"
         var result: [WikiPage] = []
         let linkPattern = #"\[\[([^\]]+)\]\]"#
         let regex = try? NSRegularExpression(pattern: linkPattern)
@@ -178,7 +189,9 @@ final class WikiStore {
             guard url.pathExtension == "md",
                   url.lastPathComponent != "index.md",
                   let content = try? String(contentsOf: url, encoding: .utf8) else { continue }
-            let rel = url.path.replacingOccurrences(of: wikiDir.path + "/", with: "")
+            let p = url.standardizedFileURL.path
+            guard p.hasPrefix(base) else { continue }
+            let rel = String(p.dropFirst(base.count))
             let title = url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "-", with: " ").capitalized
             let lines = content.components(separatedBy: .newlines)
             let snippet = lines.first { !$0.isEmpty && !$0.hasPrefix("#") } ?? ""
@@ -209,13 +222,16 @@ final class WikiStore {
         guard let enumerator = FileManager.default.enumerator(
             at: wikiDir, includingPropertiesForKeys: nil
         ) else { return }
+        let base = wikiDir.standardizedFileURL.path + "/"
         var pages: [String] = []
         for case let url as URL in enumerator {
             guard url.pathExtension == "md" else { continue }
-            pages.append(url.path.replacingOccurrences(of: wikiDir.path + "/", with: ""))
+            let p = url.standardizedFileURL.path
+            guard p.hasPrefix(base) else { continue }
+            pages.append(String(p.dropFirst(base.count)))
         }
         pages.sort()
-        let content = "# Wiki Index\n\n" + pages.map { "- [[\($0)]]" }.joined(separator: "\n") + "\n"
+        let content = "# Wiki Index\n\n" + pages.map { "- \($0)" }.joined(separator: "\n") + "\n"
         try? content.write(
             to: wikiDir.appendingPathComponent("index.md"), atomically: true, encoding: .utf8
         )
