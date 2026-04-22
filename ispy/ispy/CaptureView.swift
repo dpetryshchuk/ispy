@@ -12,6 +12,8 @@ struct CaptureView: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var errorMessage: String?
     @State private var saved = false
+    @State private var recorder = SpeechRecorder()
+    @State private var voiceContext = ""
 
     var body: some View {
         NavigationStack {
@@ -135,7 +137,9 @@ struct CaptureView: View {
             ScrollView {
                 Text(desc).padding(.horizontal)
             }
-            .frame(maxHeight: 160)
+            .frame(maxHeight: 120)
+
+            voiceInputView
 
             if saved {
                 Button("Clear") { clearAll() }
@@ -143,12 +147,51 @@ struct CaptureView: View {
                 Text("Saved ✓").foregroundStyle(.green).font(.caption)
             } else {
                 HStack(spacing: 16) {
-                    Button("Save") { saveEntry(image: image, description: desc) }
-                        .buttonStyle(.borderedProminent)
+                    Button("Save") {
+                        let full = voiceContext.isEmpty ? desc : desc + "\n\nContext: " + voiceContext
+                        saveEntry(image: image, description: full)
+                    }
+                    .buttonStyle(.borderedProminent)
                     Button("Clear") { clearAll() }
                         .buttonStyle(.bordered)
                 }
             }
+        }
+    }
+
+    private var voiceInputView: some View {
+        VStack(spacing: 6) {
+            if !voiceContext.isEmpty {
+                Text(voiceContext)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+            } else if recorder.isRecording {
+                Text(recorder.transcript.isEmpty ? "Listening…" : recorder.transcript)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
+            }
+            if let err = recorder.error {
+                Text(err).font(.caption2).foregroundStyle(.red)
+            }
+            Button {
+                if recorder.isRecording {
+                    voiceContext = recorder.stop()
+                } else {
+                    voiceContext = ""
+                    recorder.start()
+                }
+            } label: {
+                Label(
+                    recorder.isRecording ? "Stop Recording" : "Add Voice Context",
+                    systemImage: recorder.isRecording ? "stop.circle.fill" : "mic.circle"
+                )
+                .font(.subheadline)
+            }
+            .foregroundStyle(recorder.isRecording ? .red : .accentColor)
         }
     }
 
@@ -181,6 +224,8 @@ struct CaptureView: View {
         errorMessage = nil
         photoItem = nil
         saved = false
+        voiceContext = ""
+        if recorder.isRecording { recorder.stop() }
     }
 
     private func clearAll() {

@@ -362,7 +362,9 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "ispy uses the camera to capture moments";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "ispy uses the microphone to add voice context to your captures";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "ispy reads your photo library to analyze images";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "ispy transcribes your voice notes to add context to captures";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -401,7 +403,9 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "ispy uses the camera to capture moments";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "ispy uses the microphone to add voice context to your captures";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "ispy reads your photo library to analyze images";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "ispy transcribes your voice notes to add context to captures";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

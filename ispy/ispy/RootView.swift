@@ -6,6 +6,7 @@ struct RootView: View {
     private let wikiStore: WikiStore
     private let dreamLog: DreamLog
     private let dreamService: DreamService
+    private let chatService: ChatService
 
     @State private var selectedTab = 0
 
@@ -19,6 +20,7 @@ struct RootView: View {
         self.wikiStore = wiki
         self.dreamLog = log
         self.dreamService = DreamService(wikiStore: wiki, log: log, gemmaService: gemma)
+        self.chatService = ChatService(wikiStore: wiki, memoryStore: memory)
     }
 
     var body: some View {
@@ -29,7 +31,7 @@ struct RootView: View {
                 connectionCount: wikiStore.connectionCount(),
                 isDreaming: dreamService.isRunning,
                 onDream: {
-                    selectedTab = 4
+                    selectedTab = 5
                     Task { await dreamService.dream(memoryStore: memoryStore) }
                 }
             )
@@ -48,9 +50,13 @@ struct RootView: View {
                 .tabItem { Label("Wiki", systemImage: "folder") }
                 .tag(3)
 
+            ChatView(chatService: chatService, gemmaService: gemmaService)
+                .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }
+                .tag(4)
+
             DreamView(dreamService: dreamService, dreamLog: dreamLog, memoryStore: memoryStore)
                 .tabItem { Label("Dream", systemImage: "sparkles") }
-                .tag(4)
+                .tag(5)
         }
         .task {
             await gemmaService.start()

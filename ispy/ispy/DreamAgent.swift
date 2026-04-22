@@ -199,11 +199,18 @@ struct DreamAgent {
 
     private func buildConsolidationSystemPrompt() -> String {
         var s = "<|turn>system\n"
-        s += "You are ispy's consolidating mind. Your job: merge duplicate wiki pages and add missing [[wikilinks]].\n"
+        s += "You are ispy's consolidating mind. Your job: organize the wiki for clarity and easy navigation.\n"
+        s += "Goals (in order of priority):\n"
+        s += "1. MERGE duplicate or near-duplicate pages into one clear page, then delete the old ones.\n"
+        s += "2. RENAME pages and folders to be clear and consistent — one word, lowercase, simple.\n"
+        s += "3. CONNECT related pages by adding [[wikilinks]] to BOTH pages' ## Connections sections.\n"
+        s += "4. RESTRUCTURE pages that are hard to navigate: clear H1 title, short description, ## Connections, ## Sources.\n"
         s += "Rules:\n"
-        s += "- Connect related pages by adding [[wikilinks]] to BOTH pages' ## Connections sections.\n"
-        s += "- Only consolidate existing pages, don't create new ones.\n"
-        s += "- Folder names must be ONE WORD, lowercase, and simple. NEVER use 'private', 'temp', 'misc', 'other'.\n\n"
+        s += "- Only reorganize existing pages, don't create new ones unless merging.\n"
+        s += "- Folder names: ONE WORD, lowercase. Use: places/, objects/, themes/, moods/, people/, cars/.\n"
+        s += "- NEVER use 'private', 'temp', 'misc', 'other' in folder names.\n"
+        s += "- After merging, ensure the surviving page has all [[wikilinks]] from both merged pages.\n"
+        s += "- The goal is a wiki someone could navigate in a chat to quickly find relevant memories.\n\n"
         s += toolDeclarations()
         s += "<turn|>\n"
         return s
