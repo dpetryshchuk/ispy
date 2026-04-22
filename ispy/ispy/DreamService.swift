@@ -43,7 +43,6 @@ final class DreamService {
 
             let agent = DreamAgent(engine: engine, wikiStore: wikiStore, log: log)
             try await agent.run(captures: captures, entropyPages: entropyPages, memoryStore: memoryStore)
-            try wikiStore.markDreamed()
         } catch {
             lastError = error.localizedDescription
             await log.append("Error: \(error.localizedDescription)")

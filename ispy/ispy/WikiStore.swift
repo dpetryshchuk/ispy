@@ -42,8 +42,8 @@ final class WikiStore {
         return iso.date(from: str)
     }
 
-    func markDreamed() throws {
-        let obj: [String: String] = ["lastDreamed": iso.string(from: Date())]
+    func markDreamed(upTo date: Date = Date()) throws {
+        let obj: [String: String] = ["lastDreamed": iso.string(from: date)]
         let data = try JSONSerialization.data(withJSONObject: obj)
         try data.write(to: dreamStateURL)
     }
@@ -128,6 +128,19 @@ final class WikiStore {
         content = content.replacingOccurrences(of: old, with: new)
         try content.write(to: url, atomically: true, encoding: .utf8)
         touchCache(page: path)
+        return "ok"
+    }
+
+    // MARK: - Tool: delete_file
+
+    @discardableResult
+    func deleteFile(path: String) throws -> String {
+        let url = wikiDir.appendingPathComponent(path)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw WikiError.fileNotFound(path)
+        }
+        try FileManager.default.removeItem(at: url)
+        updateWikiIndex()
         return "ok"
     }
 

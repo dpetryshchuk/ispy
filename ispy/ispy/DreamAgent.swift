@@ -23,6 +23,8 @@ struct DreamAgent {
         for (i, capture) in captures.enumerated() {
             await log.append("[\(i+1)/\(captures.count)] \(capture.timestamp.formatted(.iso8601))")
             try await processCapture(capture, entropyPages: entropyPages, memoryStore: memoryStore)
+            // Mark this capture processed immediately so a crash won't reprocess it
+            try? wikiStore.markDreamed(upTo: capture.timestamp)
         }
         await log.append("Consolidation started")
         try await runConsolidationPass()
@@ -49,11 +51,14 @@ struct DreamAgent {
         let systemBlock = buildMemorySystemPrompt(entropyPages: entropyPages, visionContext: visionContext)
         let firstInput = systemBlock +
             "<|turn>user\n" +
-            "Process this memory and update the wiki. Use list_wiki to see existing pages, " +
-            "read_file to inspect relevant ones, then write_file or edit_file to update. " +
-            "Write wiki pages in first person. Add a ## Sources section containing [[memory:\(capture.id.uuidString)]] " +
-            "to every page you create or update for this memory. " +
-            "When finished, respond with plain text only (no tool call).\n\n" +
+            "Process this memory and update the wiki.\n" +
+            "REQUIRED STEPS:\n" +
+            "1. Call list_wiki to see all existing pages.\n" +
+            "2. For every page that might be relevant, call read_file to read its FULL content before changing it.\n" +
+            "3. Use edit_file to update existing pages, write_file only for brand-new pages.\n" +
+            "4. Use delete_file to remove duplicate or empty pages.\n" +
+            "5. Add [[memory:\(capture.id.uuidString)]] to the ## Sources section of every page you touch.\n" +
+            "6. When done, respond with plain text only (no tool call).\n\n" +
             "Memory ID: \(capture.id.uuidString)\n" +
             "Memory timestamp (UTC): \(capture.timestamp.formatted(.iso8601))\n" +
             "Memory description:\n\(capture.description)\n" +
@@ -81,9 +86,13 @@ struct DreamAgent {
         let index = wikiStore.listWiki()
         let firstInput = buildConsolidationSystemPrompt() +
             "<|turn>user\n" +
-            "Review the wiki index and clean it up: merge duplicate pages, " +
-            "add missing [[wikilinks]] between related pages. " +
-            "When finished, respond with plain text only (no tool call).\n\n" +
+            "Review the wiki and consolidate it.\n" +
+            "REQUIRED STEPS:\n" +
+            "1. Call list_wiki to see all pages.\n" +
+            "2. Call read_file on pages that look related or duplicate.\n" +
+            "3. Merge duplicate pages using write_file (full rewrite) then delete_file to remove the old one.\n" +
+            "4. Add missing [[wikilinks]] between related pages using edit_file.\n" +
+            "5. When done, respond with plain text only (no tool call).\n\n" +
             "Wiki index:\n\(index)\n" +
             "<turn|>\n<|turn>model\n"
 
@@ -142,6 +151,8 @@ struct DreamAgent {
                     old: call.args["old"] ?? "",
                     new: call.args["new"] ?? ""
                 )
+            case "delete_file":
+                result = try wikiStore.deleteFile(path: cleanPath(call.args["path"] ?? ""))
             case "search_wiki":
                 result = wikiStore.searchWiki(query: call.args["query"] ?? "")
             default:
@@ -216,6 +227,10 @@ struct DreamAgent {
         <|tool>declaration:edit_file
         description:\(q)Replace a section in an existing wiki page\(q)
         ,parameters:{properties:{path:{description:\(q)File path\(q),type:\(q)STRING\(q)},old:{description:\(q)Exact text to find and replace\(q),type:\(q)STRING\(q)},new:{description:\(q)Replacement text\(q),type:\(q)STRING\(q)}},required:[\(q)path\(q),\(q)old\(q),\(q)new\(q)],type:\(q)OBJECT\(q)},response:{description:\(q)ok or error\(q),type:\(q)STRING\(q)}
+        <tool|>
+        <|tool>declaration:delete_file
+        description:\(q)Delete a wiki page by path\(q)
+        ,parameters:{properties:{path:{description:\(q)File path e.g. places/name.md\(q),type:\(q)STRING\(q)}},required:[\(q)path\(q)],type:\(q)OBJECT\(q)},response:{description:\(q)ok or error\(q),type:\(q)STRING\(q)}
         <tool|>
         <|tool>declaration:search_wiki
         description:\(q)Full-text search across all wiki pages\(q)
