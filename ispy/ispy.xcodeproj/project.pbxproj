@@ -17,16 +17,12 @@
 		32557CF82F98050800D2DCCB /* MLXFast in Frameworks */ = {isa = PBXBuildFile; productRef = 32557CF72F98050800D2DCCB /* MLXFast */; };
 		32557CFA2F98050800D2DCCB /* MLXRandom in Frameworks */ = {isa = PBXBuildFile; productRef = 32557CF92F98050800D2DCCB /* MLXRandom */; };
 		32557CFC2F98055E00D2DCCB /* Hub in Frameworks */ = {isa = PBXBuildFile; productRef = 32557CFB2F98055E00D2DCCB /* Hub */; };
-		8DE2AADA1FF5D07327378D97 /* Pods_ispy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3C7B9084CA8F8F8D56D5704B /* Pods_ispy.framework */; };
 		AA0000012F99ABCD00000001 /* LiteRTLMSwift in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000022F99ABCD00000002 /* LiteRTLMSwift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		08A54C615111A60B137A51C3 /* ispy.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = ispy.entitlements; sourceTree = "<group>"; };
-		0F5B82824EDF6B252DC325C0 /* Pods-ispy.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ispy.release.xcconfig"; path = "Target Support Files/Pods-ispy/Pods-ispy.release.xcconfig"; sourceTree = "<group>"; };
 		329559C42F96CF8F0047FDCA /* ispy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ispy.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		3C7B9084CA8F8F8D56D5704B /* Pods_ispy.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_ispy.framework; sourceTree = BUILT_PRODUCTS_DIR; };
-		64D808CEB5DD2E79268A0A8F /* Pods-ispy.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-ispy.debug.xcconfig"; path = "Target Support Files/Pods-ispy/Pods-ispy.debug.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -46,7 +42,6 @@
 				32557CEF2F9804ED00D2DCCB /* MLXHuggingFace in Frameworks */,
 				32557CE82F9804CD00D2DCCB /* Hub in Frameworks */,
 				32557CFA2F98050800D2DCCB /* MLXRandom in Frameworks */,
-				8DE2AADA1FF5D07327378D97 /* Pods_ispy.framework in Frameworks */,
 				32557CF32F9804ED00D2DCCB /* MLXVLM in Frameworks */,
 				32557CF62F98050800D2DCCB /* MLX in Frameworks */,
 				32557CEC2F9804CD00D2DCCB /* Transformers in Frameworks */,
@@ -65,8 +60,6 @@
 			children = (
 				329559C62F96CF8F0047FDCA /* ispy */,
 				329559C52F96CF8F0047FDCA /* Products */,
-				F96B9ED67E4750C457103F3F /* Pods */,
-				822B695A9A1A1D2E446A5AD9 /* Frameworks */,
 				08A54C615111A60B137A51C3 /* ispy.entitlements */,
 			);
 			sourceTree = "<group>";
@@ -79,23 +72,6 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		822B695A9A1A1D2E446A5AD9 /* Frameworks */ = {
-			isa = PBXGroup;
-			children = (
-				3C7B9084CA8F8F8D56D5704B /* Pods_ispy.framework */,
-			);
-			name = Frameworks;
-			sourceTree = "<group>";
-		};
-		F96B9ED67E4750C457103F3F /* Pods */ = {
-			isa = PBXGroup;
-			children = (
-				64D808CEB5DD2E79268A0A8F /* Pods-ispy.debug.xcconfig */,
-				0F5B82824EDF6B252DC325C0 /* Pods-ispy.release.xcconfig */,
-			);
-			path = Pods;
-			sourceTree = "<group>";
-		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -103,7 +79,6 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 329559CF2F96CF910047FDCA /* Build configuration list for PBXNativeTarget "ispy" */;
 			buildPhases = (
-				E69DC123083CF9AF6AE100D3 /* [CP] Check Pods Manifest.lock */,
 				329559C02F96CF8F0047FDCA /* Sources */,
 				329559C12F96CF8F0047FDCA /* Frameworks */,
 				329559C22F96CF8F0047FDCA /* Resources */,
@@ -189,28 +164,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "DYLIB=\"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/CLiteRTLM.framework/libGemmaModelConstraintProvider.dylib\"\nif [ -f \"$DYLIB\" ]; then\n  codesign --force --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" --timestamp=none \"$DYLIB\"\nfi\n";
-			showEnvVarsInLog = 0;
-		};
-		E69DC123083CF9AF6AE100D3 /* [CP] Check Pods Manifest.lock */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
-				"${PODS_ROOT}/Manifest.lock",
-			);
-			name = "[CP] Check Pods Manifest.lock";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(DERIVED_FILE_DIR)/Pods-ispy-checkManifestLockResult.txt",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */
@@ -349,7 +302,6 @@
 		};
 		329559D02F96CF910047FDCA /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 64D808CEB5DD2E79268A0A8F /* Pods-ispy.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -390,7 +342,6 @@
 		};
 		329559D12F96CF910047FDCA /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 0F5B82824EDF6B252DC325C0 /* Pods-ispy.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
