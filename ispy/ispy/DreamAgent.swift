@@ -12,7 +12,7 @@ struct DreamAgent {
     let log: DreamLog
 
     private let maxMemoryIter = 20
-    private let maxGCIter = 30
+    private let maxConsolidationIter = 30
 
     private let strQ = "<|\u{22}|>"
 
@@ -24,8 +24,8 @@ struct DreamAgent {
             await log.append("[\(i+1)/\(captures.count)] \(capture.timestamp.formatted(.iso8601))")
             try await processCapture(capture, entropyPages: entropyPages)
         }
-        await log.append("GC pass started")
-        try await runGCPass()
+        await log.append("Consolidation started")
+        try await runConsolidationPass()
     }
 
     // MARK: - Memory loop
@@ -57,15 +57,15 @@ struct DreamAgent {
         }
     }
 
-    // MARK: - GC pass
+    // MARK: - Consolidation pass
 
-    private func runGCPass() async throws {
+    private func runConsolidationPass() async throws {
         try await engine.openSession(temperature: 0.3, maxTokens: 512)
 
         defer { engine.closeSession() }
 
         let index = wikiStore.listWiki()
-        let firstInput = buildGCSystemPrompt() +
+        let firstInput = buildConsolidationSystemPrompt() +
             "<|turn>user\n" +
             "Review the wiki index and clean it up: merge duplicate pages, " +
             "add missing [[wikilinks]] between related pages. " +
@@ -75,11 +75,11 @@ struct DreamAgent {
 
         var response = try await runTurn(firstInput)
 
-        for _ in 0..<maxGCIter {
+        for _ in 0..<maxConsolidationIter {
             let clean = stripThinking(response)
             guard let call = parseToolCall(from: clean) else { break }
             let result = executeToolCall(call)
-            await log.append("GC → \(call.name)(\(shortArgs(call.args))) → \(result.preview)")
+            await log.append("Consolidate → \(call.name)(\(shortArgs(call.args))) → \(result.preview)")
             let responseInput = formatToolResponse(call.name, result: result.full) + "<|turn>model\n"
             response = try await runTurn(responseInput)
         }
@@ -159,9 +159,9 @@ struct DreamAgent {
         return s
     }
 
-    private func buildGCSystemPrompt() -> String {
+    private func buildConsolidationSystemPrompt() -> String {
         var s = "<|turn>system\n"
-        s += "You are ispy's memory organizer. Your job: merge duplicate wiki pages and add missing [[wikilinks]].\n"
+        s += "You are ispy's consolidating mind. Your job: merge duplicate wiki pages and add missing [[wikilinks]].\n"
         s += "Rules:\n"
         s += "- Connect related pages by adding [[wikilinks]] to BOTH pages' ## Connections sections.\n"
         s += "- Only consolidate existing pages, don't create new ones.\n"

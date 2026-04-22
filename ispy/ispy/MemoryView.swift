@@ -3,6 +3,7 @@ import UIKit
 
 struct MemoryView: View {
     let memoryStore: MemoryStore
+    let lastDreamed: Date?
     @State private var selectedEntry: MemoryEntry?
 
     var body: some View {
@@ -32,12 +33,18 @@ struct MemoryView: View {
         List {
             ForEach(Array(memoryStore.entries.reversed())) { entry in
                 Button { selectedEntry = entry } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(entry.timestamp, format: .dateTime.day().month().hour().minute())
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(entry.description.components(separatedBy: .newlines).first ?? "")
-                            .lineLimit(2)
+                    HStack(spacing: 10) {
+                        let processed = lastDreamed.map { entry.timestamp <= $0 } ?? false
+                        Circle()
+                            .fill(processed ? Color.purple.opacity(0.7) : Color.secondary.opacity(0.2))
+                            .frame(width: 7, height: 7)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(entry.timestamp, format: .dateTime.day().month().hour().minute())
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(entry.description.components(separatedBy: .newlines).first ?? "")
+                                .lineLimit(2)
+                        }
                     }
                 }
                 .swipeActions(edge: .trailing) {

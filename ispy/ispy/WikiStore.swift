@@ -6,6 +6,10 @@ struct WikiPage: Identifiable {
     let title: String
     let snippet: String
     let links: [String]
+
+    var folder: String {
+        path.components(separatedBy: "/").first ?? "other"
+    }
 }
 
 struct CacheEntry: Codable {
