@@ -231,7 +231,7 @@ final class WikiStore {
             pages.append(String(p.dropFirst(base.count)))
         }
         pages.sort()
-        let content = "# Wiki Index\n\n" + pages.map { "- \($0)" }.joined(separator: "\n") + "\n"
+        let content = "# Wiki Index\n\n" + pages.map { "- [[\($0)]]" }.joined(separator: "\n") + "\n"
         try? content.write(
             to: wikiDir.appendingPathComponent("index.md"), atomically: true, encoding: .utf8
         )

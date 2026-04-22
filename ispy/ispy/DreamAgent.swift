@@ -115,6 +115,12 @@ struct DreamAgent {
         var preview: String { String(full.prefix(80)).replacingOccurrences(of: "\n", with: " ") }
     }
 
+    private func cleanPath(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: "[[", with: "")
+            .replacingOccurrences(of: "]]", with: "")
+    }
+
     private func executeToolCall(_ call: ParsedToolCall) -> ToolResult {
         do {
             let result: String
@@ -122,14 +128,14 @@ struct DreamAgent {
             case "list_wiki":
                 result = wikiStore.listWiki()
             case "read_file":
-                result = wikiStore.readFile(path: call.args["path"] ?? "")
+                result = wikiStore.readFile(path: cleanPath(call.args["path"] ?? ""))
             case "write_file":
                 result = try wikiStore.writeFile(
-                    path: call.args["path"] ?? "", content: call.args["content"] ?? ""
+                    path: cleanPath(call.args["path"] ?? ""), content: call.args["content"] ?? ""
                 )
             case "edit_file":
                 result = try wikiStore.editFile(
-                    path: call.args["path"] ?? "",
+                    path: cleanPath(call.args["path"] ?? ""),
                     old: call.args["old"] ?? "",
                     new: call.args["new"] ?? ""
                 )
