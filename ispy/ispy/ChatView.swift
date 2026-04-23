@@ -272,6 +272,7 @@ struct AssistantBubble: View {
 
     private var segments: [Segment] {
         var result: [Segment] = []
+        var seenUUIDs = Set<UUID>()
         guard let re = try? NSRegularExpression(pattern: #"\[\[memory:([0-9A-Fa-f-]{36})\]\]"#) else {
             return [Segment(kind: .text(text))]
         }
@@ -281,7 +282,8 @@ struct AssistantBubble: View {
             let before = ns.substring(with: NSRange(location: cursor, length: m.range.location - cursor))
             if !before.isEmpty { result.append(Segment(kind: .text(before))) }
             if let uuidRange = Range(m.range(at: 1), in: text),
-               let uuid = UUID(uuidString: String(text[uuidRange])) {
+               let uuid = UUID(uuidString: String(text[uuidRange])),
+               seenUUIDs.insert(uuid).inserted {
                 result.append(Segment(kind: .memory(uuid)))
             }
             cursor = m.range.location + m.range.length

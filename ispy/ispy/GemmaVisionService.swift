@@ -67,6 +67,7 @@ final class GemmaVisionService {
 
     func describe(image: UIImage) async throws -> String {
         guard let engine, state == .ready else { throw GemmaVisionError.notLoaded }
+        engine.closeSession()  // preempt any stale chat/dream session
         let small = image.downscaled(maxDimension: 768)
         guard let imageData = small.jpegData(compressionQuality: 0.8) else {
             throw GemmaVisionError.invalidImage

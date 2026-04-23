@@ -174,20 +174,49 @@ struct DreamAgent {
         temperature: Float,
         logPrefix: String
     ) async throws {
-        try await engine.openSession(temperature: temperature, maxTokens: 8192)
-        defer { engine.closeSession() }
+        var remainingIter = maxIter
+        var currentInstruction = userInstruction
 
-        let firstInput = systemPrompt +
-            "<|turn>user\n" + userInstruction + "\n<turn|>\n<|turn>model\n"
-        var response = try await runTurn(firstInput, recordingInput: firstInput)
+        while remainingIter > 0 {
+            do {
+                try await engine.openSession(temperature: temperature, maxTokens: 16384)
+                defer { engine.closeSession() }
 
-        for _ in 0..<maxIter {
-            let clean = stripThinking(response)
-            guard let call = parseToolCall(from: clean) else { break }
-            let result = executeToolCall(call)
-            await log.append("\(logPrefix) → \(call.name)(\(shortArgs(call.args))) → \(result.preview)")
-            let next = formatToolResponse(call.name, result: result.full) + "<|turn>model\n"
-            response = try await runTurn(next, recordingInput: next)
+                let firstInput = systemPrompt +
+                    "<|turn>user\n" + currentInstruction + "\n<turn|>\n<|turn>model\n"
+                var response = try await runTurn(firstInput, recordingInput: firstInput)
+
+                while remainingIter > 0 {
+                    let clean = stripThinking(response)
+                    guard let call = parseToolCall(from: clean) else {
+                        remainingIter = 0
+                        break
+                    }
+                    let result = executeToolCall(call)
+                    await log.append("\(logPrefix) → \(call.name)(\(shortArgs(call.args))) → \(result.preview)")
+                    let next = formatToolResponse(call.name, result: result.full) + "<|turn>model\n"
+                    response = try await runTurn(next, recordingInput: next)
+                    remainingIter -= 1
+                }
+                return // completed normally
+
+            } catch {
+                let msg = error.localizedDescription.lowercased()
+                let isTokenError = msg.contains("token") || msg.contains("context") ||
+                                   msg.contains("length") || msg.contains("limit") ||
+                                   msg.contains("overflow") || msg.contains("kv")
+                guard isTokenError && remainingIter > 0 else { throw error }
+                await log.append("\(logPrefix) ⚠️ token limit — compacting and resuming (\(remainingIter) iters left)")
+                currentInstruction = """
+                    You were interrupted by a context limit. Whatever work you completed is already saved in the wiki. Resume from where you left off.
+
+                    Current wiki state:
+                    \(wikiStore.listWiki())
+
+                    Original task:
+                    \(userInstruction)
+                    """
+            }
         }
     }
 
@@ -266,6 +295,7 @@ struct DreamAgent {
         s += "RIGHT:  'A [[qualities/tan]] dog ran across the [[places/grass-area]].'\n"
         s += "The ## Connections section is for links that didn't fit inline (abstract relationships, less prominent mentions).\n\n"
 
+        s += "FILE SYSTEM: Files are stored flat. 'folder/page.md' just means the file is named that — no separate folder creation needed. Use write_file with any path like 'qualities/tan.md' and it works immediately.\n\n"
         s += "ATOMICITY RULE — one idea per page. Example:\n"
         s += "WRONG: entities/dog-on-grass-in-sunlight.md (three ideas merged)\n"
         s += "RIGHT: entities/tan-dog.md + places/grass-area.md + qualities/afternoon-sunlight.md\n\n"

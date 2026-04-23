@@ -263,6 +263,7 @@ Never.
         var unique = Set<String>()
         for page in pages {
             for link in page.links {
+                guard link != "index.md" && !link.hasSuffix("/index.md") else { continue }
                 unique.insert(link)
             }
         }

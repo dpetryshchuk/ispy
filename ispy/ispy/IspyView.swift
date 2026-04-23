@@ -7,13 +7,13 @@ struct EvolutionStage {
 }
 
 private let stages: [EvolutionStage] = [
-    EvolutionStage(minCaptures: 0),
-    EvolutionStage(minCaptures: 10),
-    EvolutionStage(minCaptures: 25),
-    EvolutionStage(minCaptures: 100),
-    EvolutionStage(minCaptures: 250),
-    EvolutionStage(minCaptures: 500),
-    EvolutionStage(minCaptures: 1000),
+    EvolutionStage(minCaptures: 0),    // dot
+    EvolutionStage(minCaptures: 10),   // line
+    EvolutionStage(minCaptures: 25),   // triangle
+    EvolutionStage(minCaptures: 50),   // diamond
+    EvolutionStage(minCaptures: 100),  // pentagon
+    EvolutionStage(minCaptures: 200),  // hexagon
+    EvolutionStage(minCaptures: 500),  // star
 ]
 
 private let stageNames = ["dot", "line", "triangle", "diamond", "pentagon", "hexagon", "star"]
@@ -43,6 +43,16 @@ struct IspyView: View {
         devStageOverride ?? evolutionStageIndex(for: captureCount)
     }
 
+    private var milestoneGlow: (color: Color, radius: CGFloat)? {
+        guard captureCount >= 10 else { return nil }
+        let milestone = captureCount / 10
+        let hue = Double(milestone % 12) / 12.0
+        let withinWindow = Double(captureCount % 10) / 10.0
+        let intensity = 0.25 + withinWindow * 0.35
+        let radius: CGFloat = 10 + CGFloat(withinWindow) * 10
+        return (Color(hue: hue, saturation: 0.7, brightness: 1.0).opacity(intensity), radius)
+    }
+
     private var breatheDuration: Double {
         if isDreaming { return 0.7 }
         if pendingCount > 10 { return 1.0 }
@@ -54,7 +64,10 @@ struct IspyView: View {
         VStack(spacing: 0) {
             Spacer()
 
-            IspyShapeView(stageIndex: stageIndex, size: 160)
+            let glow = milestoneGlow
+            IspyShapeView(stageIndex: stageIndex, size: 160,
+                          glowColor: glow?.color ?? .clear,
+                          glowRadius: glow?.radius ?? 0)
                 .scaleEffect(breathe ? 1.05 : 1.0)
                 .opacity(isDreaming && breathe ? 0.6 : 1.0)
                 .animation(.spring(duration: 0.6), value: stageIndex)
@@ -106,6 +119,8 @@ struct IspyShapeView: View {
     let stageIndex: Int
     let size: CGFloat
     var isAnalyzing: Bool = false
+    var glowColor: Color = .clear
+    var glowRadius: CGFloat = 0
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0/30.0)) { tl in
@@ -120,6 +135,7 @@ struct IspyShapeView: View {
         }
         .frame(width: size, height: size)
         .foregroundStyle(Color.primary)
+        .shadow(color: glowColor, radius: glowRadius, x: 0, y: 0)
     }
 
     private func drawStage(ctx: GraphicsContext, cx: CGFloat, cy: CGFloat, r: CGFloat, t: Double) {
