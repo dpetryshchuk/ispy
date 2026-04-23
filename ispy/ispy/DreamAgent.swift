@@ -117,7 +117,7 @@ struct DreamAgent {
         temperature: Float,
         logPrefix: String
     ) async throws {
-        try await engine.openSession(temperature: temperature, maxTokens: 1024)
+        try await engine.openSession(temperature: temperature, maxTokens: 4096)
         defer { engine.closeSession() }
 
         let firstInput = systemPrompt +

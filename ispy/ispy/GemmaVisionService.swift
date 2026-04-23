@@ -74,7 +74,7 @@ final class GemmaVisionService {
         return try await engine.vision(
             imageData: imageData,
             prompt: "Describe this image in detail. Include the main subject, setting, mood, and any notable details.",
-            maxTokens: 400
+            maxTokens: 1600
         )
     }
 }
