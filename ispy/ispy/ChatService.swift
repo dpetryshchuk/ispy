@@ -242,8 +242,7 @@ final class ChatService {
         var s = "<|turn>system\n"
         s += promptConfig.chatPersonalityPrompt + "\n\n"
         let state = wikiStore.readState()
-        s += "--- YOUR CURRENT STATE ---\n\(state)\n\n"
-        s += "IMPORTANT: When you mention or recall a specific memory image, include [[memory:UUID]] in your response using the exact UUID from the memory. The UI will show the image inline.\n\n"
+        s += "--- YOUR CURRENT STATE OF MIND ---\n\(state)\n\n"
         s += toolDeclarations()
         s += "<turn|>\n"
         return s

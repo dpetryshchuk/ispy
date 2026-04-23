@@ -12,8 +12,7 @@ struct DreamAgent {
     let log: DreamLog
     let promptConfig: PromptConfig
 
-    private let maxMemoryIter = 20
-    private let maxConsolidationIter = 30
+    private let maxIterPerRound = 12
     private let strQ = "<|\u{22}|>"
 
     // MARK: - Entry point
@@ -37,10 +36,6 @@ struct DreamAgent {
     // MARK: - Memory loop
 
     private func processCapture(_ capture: MemoryEntry, entropyPages: [String], memoryStore: MemoryStore) async throws {
-        try await engine.openSession(temperature: 0.3, maxTokens: 1024)
-        defer { engine.closeSession() }
-
-        let systemBlock = buildMemorySystemPrompt(entropyPages: entropyPages, visionContext: "")
         let dateFmt = DateFormatter()
         dateFmt.dateFormat = "yyyy-MM-dd"
         let memoryDate = dateFmt.string(from: capture.timestamp)
@@ -48,81 +43,96 @@ struct DreamAgent {
             .replacingOccurrences(of: "{MEMORY_ID}", with: capture.id.uuidString)
             .replacingOccurrences(of: "{MEMORY_DATE}", with: memoryDate)
 
-        let firstInput = systemBlock +
-            "<|turn>user\n" +
+        let userInstruction =
             "Process this memory and update the wiki.\n\n" +
             extraInstructions + "\n\n" +
             "--- MEMORY ---\n" +
             "ID: \(capture.id.uuidString)\n" +
             "Captured: \(capture.timestamp.formatted(.iso8601))\n" +
-            "Visual analysis:\n\(capture.description)\n" +
-            "<turn|>\n<|turn>model\n"
+            "Visual analysis:\n\(capture.description)\n"
 
-        var response = try await runTurn(firstInput, recordingInput: firstInput)
-
-        for _ in 0..<maxMemoryIter {
-            let clean = stripThinking(response)
-            guard let call = parseToolCall(from: clean) else { break }
-            let result = executeToolCall(call)
-            await log.append("→ \(call.name)(\(shortArgs(call.args))) → \(result.preview)")
-            let responseInput = formatToolResponse(call.name, result: result.full) + "<|turn>model\n"
-            response = try await runTurn(responseInput, recordingInput: responseInput)
-        }
+        try await runSession(
+            systemPrompt: buildMemorySystemPrompt(entropyPages: entropyPages),
+            userInstruction: userInstruction,
+            maxIter: maxIterPerRound,
+            temperature: 0.3,
+            logPrefix: "Memory"
+        )
     }
 
-    // MARK: - Reflection pass (thinking + state update)
+    // MARK: - Reflection pass (two focused rounds with fresh contexts)
 
     private func runReflectionPass() async throws {
-        try await engine.openSession(temperature: 0.6, maxTokens: 1024)
+        // Round 1: explore memory and write initial pattern/reflection pages
+        try await runSession(
+            systemPrompt: buildReflectionSystemPrompt(state: wikiStore.readState()),
+            userInstruction: promptConfig.reflectionInstructions +
+                "\n\nFor this pass: read pages and write your first wave of pattern and reflection pages.",
+            maxIter: maxIterPerRound,
+            temperature: 0.6,
+            logPrefix: "Reflect"
+        )
+        await log.append("Reflection — second pass…")
+        // Round 2: fresh context, sees what round 1 wrote, writes more + updates state.md
+        try await runSession(
+            systemPrompt: buildReflectionSystemPrompt(state: wikiStore.readState()),
+            userInstruction: "You already reflected once. Call list_memory to see everything including what you just wrote. Read your new patterns/ and reflections/ pages. Write 2-3 more from different angles. Then read state.md and rewrite it to reflect your current understanding.",
+            maxIter: maxIterPerRound,
+            temperature: 0.6,
+            logPrefix: "Reflect(2)"
+        )
+    }
+
+    // MARK: - Consolidation pass (two focused rounds with fresh contexts)
+
+    private func runConsolidationPass() async throws {
+        let basePrompt = buildConsolidationSystemPrompt()
+        // Round 1: merge duplicates, split broad pages
+        try await runSession(
+            systemPrompt: basePrompt,
+            userInstruction: "Review and reorganize the wiki. Focus on merging duplicates and splitting broad pages.\n\n" +
+                promptConfig.consolidationExtraInstructions + "\n\nCurrent wiki:\n\(wikiStore.listWiki())",
+            maxIter: maxIterPerRound,
+            temperature: 0.3,
+            logPrefix: "Consolidate"
+        )
+        await log.append("Consolidation — link weaving…")
+        // Round 2: fresh context, link weaving across the now-reorganized graph
+        try await runSession(
+            systemPrompt: basePrompt,
+            userInstruction: "Focus on connections. Current wiki:\n\(wikiStore.listWiki())\n\nFor every page with fewer than 3 [[links]]: read it, find related pages, add bidirectional links. Pay special attention to qualities/ pages — link them to every entity and concept that shares that quality.",
+            maxIter: maxIterPerRound,
+            temperature: 0.3,
+            logPrefix: "Consolidate(2)"
+        )
+        await log.append("Dream complete")
+    }
+
+    // MARK: - Session helpers
+
+    private func runSession(
+        systemPrompt: String,
+        userInstruction: String,
+        maxIter: Int,
+        temperature: Float,
+        logPrefix: String
+    ) async throws {
+        try await engine.openSession(temperature: temperature, maxTokens: 1024)
         defer { engine.closeSession() }
 
-        let state = wikiStore.readState()
-        let firstInput = buildReflectionSystemPrompt(state: state) +
-            "<|turn>user\n" +
-            promptConfig.reflectionInstructions + "\n" +
-            "<turn|>\n<|turn>model\n"
-
+        let firstInput = systemPrompt +
+            "<|turn>user\n" + userInstruction + "\n<turn|>\n<|turn>model\n"
         var response = try await runTurn(firstInput, recordingInput: firstInput)
 
-        for _ in 0..<25 {
+        for _ in 0..<maxIter {
             let clean = stripThinking(response)
             guard let call = parseToolCall(from: clean) else { break }
             let result = executeToolCall(call)
-            await log.append("Reflect → \(call.name)(\(shortArgs(call.args))) → \(result.preview)")
+            await log.append("\(logPrefix) → \(call.name)(\(shortArgs(call.args))) → \(result.preview)")
             let next = formatToolResponse(call.name, result: result.full) + "<|turn>model\n"
             response = try await runTurn(next, recordingInput: next)
         }
     }
-
-    // MARK: - Consolidation pass
-
-    private func runConsolidationPass() async throws {
-        try await engine.openSession(temperature: 0.3, maxTokens: 1024)
-        defer { engine.closeSession() }
-
-        let index = wikiStore.listWiki()
-        let firstInput = buildConsolidationSystemPrompt() +
-            "<|turn>user\n" +
-            "Review and reorganize the wiki.\n\n" +
-            promptConfig.consolidationExtraInstructions + "\n\n" +
-            "Current wiki index:\n\(index)\n" +
-            "<turn|>\n<|turn>model\n"
-
-        var response = try await runTurn(firstInput, recordingInput: firstInput)
-
-        for _ in 0..<maxConsolidationIter {
-            let clean = stripThinking(response)
-            guard let call = parseToolCall(from: clean) else { break }
-            let result = executeToolCall(call)
-            await log.append("Consolidate → \(call.name)(\(shortArgs(call.args))) → \(result.preview)")
-            let responseInput = formatToolResponse(call.name, result: result.full) + "<|turn>model\n"
-            response = try await runTurn(responseInput, recordingInput: responseInput)
-        }
-
-        await log.append("Dream complete")
-    }
-
-    // MARK: - Session turn
 
     private func runTurn(_ input: String, recordingInput: String) async throws -> String {
         var output = ""
