@@ -12,7 +12,9 @@ struct DreamAgent {
     let log: DreamLog
     let promptConfig: PromptConfig
 
-    private let maxIterPerRound = 12
+    private let maxIterMemory = 16
+    private let maxIterReflection = 16
+    private let maxIterConsolidation = 50
     private let strQ = "<|\u{22}|>"
 
     // MARK: - Entry point
@@ -54,7 +56,7 @@ struct DreamAgent {
         try await runSession(
             systemPrompt: buildMemorySystemPrompt(entropyPages: entropyPages),
             userInstruction: userInstruction,
-            maxIter: maxIterPerRound,
+            maxIter: maxIterMemory,
             temperature: 0.3,
             logPrefix: "Memory"
         )
@@ -68,7 +70,7 @@ struct DreamAgent {
             systemPrompt: buildReflectionSystemPrompt(state: wikiStore.readState()),
             userInstruction: promptConfig.reflectionInstructions +
                 "\n\nFor this pass: read pages and write your first wave of pattern and reflection pages.",
-            maxIter: maxIterPerRound,
+            maxIter: maxIterReflection,
             temperature: 0.6,
             logPrefix: "Reflect"
         )
@@ -77,7 +79,7 @@ struct DreamAgent {
         try await runSession(
             systemPrompt: buildReflectionSystemPrompt(state: wikiStore.readState()),
             userInstruction: "You already reflected once. Call list_memory to see everything including what you just wrote. Read your new patterns/ and reflections/ pages. Write 2-3 more from different angles. Then read state.md and rewrite it to reflect your current understanding.",
-            maxIter: maxIterPerRound,
+            maxIter: maxIterReflection,
             temperature: 0.6,
             logPrefix: "Reflect(2)"
         )
@@ -88,24 +90,77 @@ struct DreamAgent {
     private func runConsolidationPass() async throws {
         let basePrompt = buildConsolidationSystemPrompt()
         let hotPages = wikiStore.topAccessedPages(limit: 10)
-        let hotList = hotPages.isEmpty ? "" : "\n\nMost-visited pages (anchor these to everything related):\n" + hotPages.map { "- \($0)" }.joined(separator: "\n")
-        // Round 1: merge duplicates, split broad pages
+        let hotList = hotPages.isEmpty ? "" : "\n\nMost-visited pages (prioritize keeping these rich and well-linked):\n" + hotPages.map { "- \($0)" }.joined(separator: "\n")
+        let wiki = wikiStore.listWiki()
+
+        // Round 1: full scan + merge duplicates
+        await log.append("Consolidation — scanning and merging…")
         try await runSession(
             systemPrompt: basePrompt,
-            userInstruction: "Review and reorganize the wiki. Focus on merging duplicates and splitting broad pages.\n\n" +
-                promptConfig.consolidationExtraInstructions + "\n\nCurrent wiki:\n\(wikiStore.listWiki())" + hotList,
-            maxIter: maxIterPerRound,
-            temperature: 0.3,
+            userInstruction: """
+            PHASE 1 — FULL SCAN AND MERGE.
+
+            Current wiki (all pages):
+            \(wiki)\(hotList)
+
+            \(promptConfig.consolidationExtraInstructions)
+
+            Your job this round:
+            1. Read EVERY file listed above. All of them. Use read_file on each one.
+            2. As you read, note duplicates: pages in the same folder about the same thing (e.g. kitchen.md + kitchen-counter.md + kitchen-space.md).
+            3. For each duplicate set: write_file a single merged page (all content, all links, all sources), then delete_file each redundant page.
+            4. For each deleted page: search_memory for its name, then edit_file every page that linked to it to point to the merged page instead.
+            Do not stop until you have read every file.
+            """,
+            maxIter: maxIterConsolidation,
+            temperature: 0.2,
             logPrefix: "Consolidate"
         )
-        await log.append("Consolidation — link weaving…")
-        // Round 2: fresh context, link weaving across the now-reorganized graph
+
+        // Round 2: abstract grouping + new synthesis pages
+        await log.append("Consolidation — grouping and creating…")
         try await runSession(
             systemPrompt: basePrompt,
-            userInstruction: "Focus on connections. Current wiki:\n\(wikiStore.listWiki())" + hotList + "\n\nFor every page with fewer than 3 [[links]]: read it, find related pages, add bidirectional links. Pay special attention to qualities/ pages — link them to every entity and concept that shares that quality.",
-            maxIter: maxIterPerRound,
+            userInstruction: """
+            PHASE 2 — ABSTRACT GROUPING AND SYNTHESIS.
+
+            Current wiki (after merging):
+            \(wikiStore.listWiki())\(hotList)
+
+            Your job this round:
+            1. List all files again. For each folder, look for 3+ pages that share a property with no concept page for it.
+               Create the abstraction: concepts/animals.md if dog+cat+bird exist, concepts/warmth.md if multiple warm-toned pages exist, etc.
+            2. Read every page you haven't read yet. Look for ideas that deserve their own new page — a recurring color, a recurring time of day, a recurring place.
+            3. Write new pages for every abstraction and synthesis you find. Link them to every relevant page bidirectionally.
+            4. If a page covers 2+ unrelated concepts, split it: write both halves, delete the original.
+            Do not stop until you have processed every page.
+            """,
+            maxIter: maxIterConsolidation,
             temperature: 0.3,
             logPrefix: "Consolidate(2)"
+        )
+
+        // Round 3: link weaving
+        await log.append("Consolidation — link weaving…")
+        try await runSession(
+            systemPrompt: basePrompt,
+            userInstruction: """
+            PHASE 3 — LINK WEAVING.
+
+            Current wiki (after grouping):
+            \(wikiStore.listWiki())\(hotList)
+
+            Your job this round:
+            1. Read every page. For each one: find 2-3 pages it should link to but doesn't. Add the link inline and add the backlink.
+            2. Every qualities/ page must link to every entity and concept sharing that quality.
+            3. Every concepts/ page must link to every entity that is an instance of it.
+            4. Every page needs at least 3 [[links]]. Find every page with fewer and fix it.
+            5. Find orphaned pages (nothing links to them). Connect them into the graph.
+            Do not stop until every page has been read and linked.
+            """,
+            maxIter: maxIterConsolidation,
+            temperature: 0.3,
+            logPrefix: "Consolidate(3)"
         )
         await log.append("Dream complete")
     }
@@ -119,7 +174,7 @@ struct DreamAgent {
         temperature: Float,
         logPrefix: String
     ) async throws {
-        try await engine.openSession(temperature: temperature, maxTokens: 4096)
+        try await engine.openSession(temperature: temperature, maxTokens: 8192)
         defer { engine.closeSession() }
 
         let firstInput = systemPrompt +

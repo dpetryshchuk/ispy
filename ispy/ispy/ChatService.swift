@@ -65,7 +65,7 @@ final class ChatService {
 
         do {
             if !sessionOpen {
-                try await engine.openSession(temperature: 0.7, maxTokens: 6144)
+                try await engine.openSession(temperature: 0.7, maxTokens: 12288)
                 sessionOpen = true
                 firstTurn = true
             }

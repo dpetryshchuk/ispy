@@ -46,43 +46,28 @@ Reply with the plain-text list of all pages created or updated.
 """
 
     static let defaultConsolidationExtra = """
-Work through all steps — do not stop early:
+READ EVERYTHING BEFORE ACTING.
+You will be given the full file list. Use read_file on EVERY page before making any changes.
+You cannot find duplicates or missing links without reading the content.
 
-RULE: Before delete_file, write your reasoning to reflections/deletion-log.md first.
-Ask yourself: "Is this page truly redundant, or does it contain something unique?" Only delete if fully redundant.
-You should RARELY delete. Prefer merging content into another page over deleting.
+MERGING DUPLICATES:
+Same folder, similar name = likely duplicate. Read both. Merge into one page keeping ALL content, ALL [[links]], ALL [[memory:UUID]] tags.
+After writing the merged page: delete_file each redundant page, then fix every page that linked to the deleted files.
+Example: kitchen.md + kitchen-counter.md + kitchen-area.md → one merged entities/kitchen-counter.md, delete the other two.
 
-1. Call list_memory. Read at least 12 pages across different folders before making any changes.
+BEFORE delete_file: you must have already written the merged replacement. Never delete without merging first.
 
-2. MERGE duplicates: pages about the exact same topic — not just similar, exactly the same.
-   Read both carefully. Write a merged page keeping ALL content, [[links]], and [[memory:UUID]].
-   Only then delete_file the lesser page. If in doubt, do NOT delete — add a link instead.
+SPLITTING:
+A page covering 2+ unrelated concepts → write both halves as separate files, then delete the original.
 
-3. SPLIT broad pages: any page covering 2+ truly unrelated concepts.
-   Exception: a relationships/ page connecting two things is fine as-is.
-   After writing the split pages, delete_file only the original.
+ABSTRACT GROUPING:
+3+ pages sharing a property with no concept page for it → create the abstraction and link all instances to it bidirectionally.
 
-4. ABSTRACT GROUPING — look for emergent categories:
-   Are there 3+ entities that share a property with no concept page for that property?
-   Create it. Example: if dog, cat, and bird exist with no animals/ page → create concepts/animals.md.
-   Look for: material groups (wood, metal, glass → concepts/materials.md),
-   time groups (morning, afternoon, evening → already in time/ folder),
-   mood families (warm, cozy, domestic → could group under concepts/warmth.md).
-   Abstraction creates the richest connections.
-
-5. LINK WEAVING — the most important step:
-   a. qualities/ pages: find every entity/concept with this quality. Link both ways.
-   b. concepts/ pages: find all entities/ that are instances. Link both ways.
-   c. episodes/ pages: ensure each links to all entities and concepts it mentions.
-   d. Search recurring terms (3+ pages). Read those pages, add cross-links between ones missing links.
-   e. Every page needs at least 3 [[links]] in ## Connections.
-
-6. Find orphaned pages (0-1 links). Connect them to at least 2 related pages.
-
-7. Fix misplaced pages: colors/light → qualities/, general categories → concepts/.
-   Rename with write_file + delete_file only when the name is genuinely confusing.
-
-8. Reply with what you merged, split, grouped, linked, and reorganized.
+LINK WEAVING:
+Every [[link]] must exist in both directions. Every page needs at least 3 [[links]].
+qualities/ pages → link to every entity and concept sharing that quality.
+concepts/ pages → link to every entity that is an instance.
+Orphaned pages (nothing links to them) → connect into the graph.
 """
 
     static let defaultReflectionInstructions = """
