@@ -3,11 +3,13 @@ import SwiftUI
 struct DevSettingsView: View {
     let promptConfig: PromptConfig
     let memoryStore: MemoryStore
+    let wikiStore: WikiStore
     @Binding var devStageOverride: Int?
 
     @State private var stageEnabled = false
     @State private var stageValue: Double = 0
-    @State private var showDeleteConfirm = false
+    @State private var showDeleteExperiencesConfirm = false
+    @State private var showDeleteWikiConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -30,17 +32,34 @@ struct DevSettingsView: View {
                     set: { promptConfig.visionDreamPrompt = $0 }
                 ))
 
-                Section {
-                    Button("Reset All to Defaults", role: .destructive) {
-                        promptConfig.resetToDefaults()
+                Section("Reset") {
+                    Button("Reset Dream Cursor") {
+                        wikiStore.resetDreamCursor()
                     }
-                    Button("Delete All Salients", role: .destructive) {
-                        showDeleteConfirm = true
+                    .foregroundStyle(.orange)
+
+                    Button("Delete All Wiki Pages", role: .destructive) {
+                        showDeleteWikiConfirm = true
+                    }
+
+                    Button("Delete All Experiences", role: .destructive) {
+                        showDeleteExperiencesConfirm = true
+                    }
+
+                    Button("Reset Prompts to Defaults", role: .destructive) {
+                        promptConfig.resetToDefaults()
                     }
                 }
                 .confirmationDialog(
-                    "Delete all \(memoryStore.entries.count) salients?",
-                    isPresented: $showDeleteConfirm,
+                    "Delete all \(wikiStore.pageCount()) wiki pages?",
+                    isPresented: $showDeleteWikiConfirm,
+                    titleVisibility: .visible
+                ) {
+                    Button("Delete All Pages", role: .destructive) { wikiStore.deleteAllWikiPages() }
+                }
+                .confirmationDialog(
+                    "Delete all \(memoryStore.entries.count) experiences?",
+                    isPresented: $showDeleteExperiencesConfirm,
                     titleVisibility: .visible
                 ) {
                     Button("Delete All", role: .destructive) { memoryStore.deleteAll() }

@@ -84,6 +84,7 @@ struct RootView: View {
             DevSettingsView(
                 promptConfig: promptConfig,
                 memoryStore: memoryStore,
+                wikiStore: wikiStore,
                 devStageOverride: $devStageOverride
             )
         }
