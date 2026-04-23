@@ -9,6 +9,16 @@ struct ChatMessage: Identifiable {
     var isStreaming = false
 }
 
+struct ChatSession: Identifiable, Codable {
+    let id: UUID
+    let startedAt: Date
+    struct Entry: Codable {
+        let role: String    // "user" | "assistant"
+        let text: String
+    }
+    let entries: [Entry]
+}
+
 @Observable
 @MainActor
 final class ChatService {
@@ -18,6 +28,7 @@ final class ChatService {
 
     private let wikiStore: WikiStore
     private let memoryStore: MemoryStore
+    let promptConfig: PromptConfig
     private var engine: LiteRTLMEngine?
     private var sessionOpen = false
     private var firstTurn = true
@@ -25,9 +36,10 @@ final class ChatService {
     private let strQ = "<|\u{22}|>"
     private let maxToolIter = 15
 
-    init(wikiStore: WikiStore, memoryStore: MemoryStore) {
+    init(wikiStore: WikiStore, memoryStore: MemoryStore, promptConfig: PromptConfig) {
         self.wikiStore = wikiStore
         self.memoryStore = memoryStore
+        self.promptConfig = promptConfig
     }
 
     func setEngine(_ engine: LiteRTLMEngine?) {
@@ -83,11 +95,48 @@ final class ChatService {
     }
 
     func reset() {
+        saveSession()
         if sessionOpen { engine?.closeSession() }
         sessionOpen = false
         firstTurn = true
         messages.removeAll()
         error = nil
+    }
+
+    // MARK: - Session persistence
+
+    private static let sessionsDir: URL = {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = docs.appendingPathComponent("chatsessions")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }()
+
+    private func saveSession() {
+        let entries = messages.compactMap { msg -> ChatSession.Entry? in
+            switch msg.role {
+            case .user: return ChatSession.Entry(role: "user", text: msg.text)
+            case .assistant where !msg.text.isEmpty: return ChatSession.Entry(role: "assistant", text: msg.text)
+            default: return nil
+            }
+        }
+        guard !entries.isEmpty else { return }
+        let session = ChatSession(id: UUID(), startedAt: Date(), entries: entries)
+        let url = Self.sessionsDir.appendingPathComponent("\(session.id.uuidString).json")
+        if let data = try? JSONEncoder().encode(session) { try? data.write(to: url) }
+    }
+
+    func savedSessions() -> [ChatSession] {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: Self.sessionsDir, includingPropertiesForKeys: nil
+        ) else { return [] }
+        return files
+            .filter { $0.pathExtension == "json" }
+            .compactMap { url -> ChatSession? in
+                guard let data = try? Data(contentsOf: url) else { return nil }
+                return try? JSONDecoder().decode(ChatSession.self, from: data)
+            }
+            .sorted { $0.startedAt > $1.startedAt }
     }
 
     // MARK: - Streaming
@@ -180,10 +229,7 @@ final class ChatService {
 
     private func buildSystemPrompt() -> String {
         var s = "<|turn>system\n"
-        s += "You are ispy — a personal AI that observes and remembers the world for your user.\n"
-        s += "You have a wiki of memories and can search, read, and update it during this chat.\n"
-        s += "Be conversational, warm, and specific. Reference actual pages and memories when relevant.\n"
-        s += "When asked about something you've seen or recorded, use your tools to look it up first.\n\n"
+        s += promptConfig.chatPersonalityPrompt + "\n\n"
         s += toolDeclarations()
         s += "<turn|>\n"
         return s

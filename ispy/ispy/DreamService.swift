@@ -10,11 +10,13 @@ final class DreamService {
     private let wikiStore: WikiStore
     private let log: DreamLog
     private let gemmaService: GemmaVisionService
+    private let promptConfig: PromptConfig
 
-    init(wikiStore: WikiStore, log: DreamLog, gemmaService: GemmaVisionService) {
+    init(wikiStore: WikiStore, log: DreamLog, gemmaService: GemmaVisionService, promptConfig: PromptConfig) {
         self.wikiStore = wikiStore
         self.log = log
         self.gemmaService = gemmaService
+        self.promptConfig = promptConfig
     }
 
     func dream(memoryStore: MemoryStore) async {
@@ -41,7 +43,7 @@ final class DreamService {
                 await log.append("Surfacing old memory: \(page)")
             }
 
-            let agent = DreamAgent(engine: engine, wikiStore: wikiStore, log: log)
+            let agent = DreamAgent(engine: engine, wikiStore: wikiStore, log: log, promptConfig: promptConfig)
             try await agent.run(captures: captures, entropyPages: entropyPages, memoryStore: memoryStore)
         } catch {
             lastError = error.localizedDescription

@@ -15,7 +15,17 @@ struct MemoryView: View {
                     listView
                 }
             }
-            .navigationTitle("Memory")
+            .navigationTitle("Feed")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if !memoryStore.entries.isEmpty {
+                        Text("\(memoryStore.entries.count)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
+            }
             .sheet(item: $selectedEntry) { entry in
                 MemoryDetailView(entry: entry, photoURL: memoryStore.photoURL(for: entry)) {
                     try? memoryStore.delete(id: entry.id)
@@ -26,7 +36,7 @@ struct MemoryView: View {
     }
 
     private var emptyView: some View {
-        ContentUnavailableView("No memories", systemImage: "brain", description: Text("Capture a photo."))
+        ContentUnavailableView("Nothing here yet", systemImage: "camera", description: Text("Capture your first photo."))
     }
 
     private var listView: some View {

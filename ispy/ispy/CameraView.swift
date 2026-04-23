@@ -1,44 +1,23 @@
 import SwiftUI
+import AVFoundation
 import UIKit
 
-struct CameraView: UIViewControllerRepresentable {
-    let onCapture: (UIImage) -> Void
-    @Environment(\.dismiss) private var dismiss
+// Live camera preview backed by AVCaptureVideoPreviewLayer.
+// Session must be started externally; this view just renders it.
+struct CameraView: UIViewRepresentable {
+    let session: AVCaptureSession
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onCapture: onCapture, dismiss: dismiss)
+    func makeUIView(context: Context) -> PreviewView {
+        let view = PreviewView()
+        view.previewLayer.session = session
+        view.previewLayer.videoGravity = .resizeAspectFill
+        return view
     }
 
-    func makeUIViewController(context: Context) -> UIImagePickerController {
-        let vc = UIImagePickerController()
-        vc.sourceType = .camera
-        vc.delegate = context.coordinator
-        return vc
-    }
+    func updateUIView(_ uiView: PreviewView, context: Context) {}
 
-    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
-
-    class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-        let onCapture: (UIImage) -> Void
-        let dismiss: DismissAction
-
-        init(onCapture: @escaping (UIImage) -> Void, dismiss: DismissAction) {
-            self.onCapture = onCapture
-            self.dismiss = dismiss
-        }
-
-        func imagePickerController(
-            _ picker: UIImagePickerController,
-            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
-        ) {
-            if let image = info[.originalImage] as? UIImage {
-                onCapture(image)
-            }
-            dismiss()
-        }
-
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            dismiss()
-        }
+    final class PreviewView: UIView {
+        override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
+        var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
     }
 }

@@ -10,10 +10,10 @@ struct DreamAgent {
     let engine: LiteRTLMEngine
     let wikiStore: WikiStore
     let log: DreamLog
+    let promptConfig: PromptConfig
 
     private let maxMemoryIter = 20
     private let maxConsolidationIter = 30
-
     private let strQ = "<|\u{22}|>"
 
     // MARK: - Entry point
@@ -23,7 +23,6 @@ struct DreamAgent {
         for (i, capture) in captures.enumerated() {
             await log.append("[\(i+1)/\(captures.count)] \(capture.timestamp.formatted(.iso8601))")
             try await processCapture(capture, entropyPages: entropyPages, memoryStore: memoryStore)
-            // Mark this capture processed immediately so a crash won't reprocess it
             try? wikiStore.markDreamed(upTo: capture.timestamp)
         }
         await log.append("Consolidation started")
@@ -33,38 +32,39 @@ struct DreamAgent {
     // MARK: - Memory loop
 
     private func processCapture(_ capture: MemoryEntry, entropyPages: [String], memoryStore: MemoryStore) async throws {
-        // Look at the actual photo during dreaming — fresh vision pass before the tool loop
+        // Vision pass — look at the actual photo
         var visionContext = ""
         let photoURL = memoryStore.photoURL(for: capture)
         if let imageData = try? Data(contentsOf: photoURL) {
             await log.append("→ vision()")
-            let dreamPrompt = "You are revisiting one of your memories. Describe in detail what you see: the place, objects, atmosphere, recurring patterns, and any themes worth remembering."
-            if let fresh = try? await engine.vision(imageData: imageData, prompt: dreamPrompt, maxTokens: 256) {
+            if let fresh = try? await engine.vision(
+                imageData: imageData,
+                prompt: promptConfig.visionDreamPrompt,
+                maxTokens: 256
+            ) {
                 visionContext = fresh
             }
         }
 
         try await engine.openSession(temperature: 0.3, maxTokens: 512)
-
         defer { engine.closeSession() }
 
         let systemBlock = buildMemorySystemPrompt(entropyPages: entropyPages, visionContext: visionContext)
+        let extraInstructions = promptConfig.memoryExtraInstructions
+            .replacingOccurrences(of: "{MEMORY_ID}", with: capture.id.uuidString)
+
         let firstInput = systemBlock +
             "<|turn>user\n" +
-            "Process this memory and update the wiki.\n" +
-            "REQUIRED STEPS:\n" +
-            "1. Call list_wiki to see all existing pages.\n" +
-            "2. For every page that might be relevant, call read_file to read its FULL content before changing it.\n" +
-            "3. Use edit_file to update existing pages, write_file only for brand-new pages.\n" +
-            "4. Use delete_file to remove duplicate or empty pages.\n" +
-            "5. Add [[memory:\(capture.id.uuidString)]] to the ## Sources section of every page you touch.\n" +
-            "6. When done, respond with plain text only (no tool call).\n\n" +
-            "Memory ID: \(capture.id.uuidString)\n" +
-            "Memory timestamp (UTC): \(capture.timestamp.formatted(.iso8601))\n" +
-            "Memory description:\n\(capture.description)\n" +
+            "Process this memory and update the wiki.\n\n" +
+            extraInstructions + "\n\n" +
+            "--- MEMORY ---\n" +
+            "ID: \(capture.id.uuidString)\n" +
+            "Captured: \(capture.timestamp.formatted(.iso8601))\n" +
+            "What Gemma saw when this was captured:\n\(capture.description)\n" +
+            (visionContext.isEmpty ? "" : "\nWhat I see now looking back at the photo:\n\(visionContext)\n") +
             "<turn|>\n<|turn>model\n"
 
-        var response = try await runTurn(firstInput)
+        var response = try await runTurn(firstInput, recordingInput: firstInput)
 
         for _ in 0..<maxMemoryIter {
             let clean = stripThinking(response)
@@ -72,7 +72,7 @@ struct DreamAgent {
             let result = executeToolCall(call)
             await log.append("→ \(call.name)(\(shortArgs(call.args))) → \(result.preview)")
             let responseInput = formatToolResponse(call.name, result: result.full) + "<|turn>model\n"
-            response = try await runTurn(responseInput)
+            response = try await runTurn(responseInput, recordingInput: responseInput)
         }
     }
 
@@ -80,23 +80,17 @@ struct DreamAgent {
 
     private func runConsolidationPass() async throws {
         try await engine.openSession(temperature: 0.3, maxTokens: 512)
-
         defer { engine.closeSession() }
 
         let index = wikiStore.listWiki()
         let firstInput = buildConsolidationSystemPrompt() +
             "<|turn>user\n" +
-            "Review the wiki and consolidate it.\n" +
-            "REQUIRED STEPS:\n" +
-            "1. Call list_wiki to see all pages.\n" +
-            "2. Call read_file on pages that look related or duplicate.\n" +
-            "3. Merge duplicate pages using write_file (full rewrite) then delete_file to remove the old one.\n" +
-            "4. Add missing [[wikilinks]] between related pages using edit_file.\n" +
-            "5. When done, respond with plain text only (no tool call).\n\n" +
-            "Wiki index:\n\(index)\n" +
+            "Review and reorganize the wiki.\n\n" +
+            promptConfig.consolidationExtraInstructions + "\n\n" +
+            "Current wiki index:\n\(index)\n" +
             "<turn|>\n<|turn>model\n"
 
-        var response = try await runTurn(firstInput)
+        var response = try await runTurn(firstInput, recordingInput: firstInput)
 
         for _ in 0..<maxConsolidationIter {
             let clean = stripThinking(response)
@@ -104,7 +98,7 @@ struct DreamAgent {
             let result = executeToolCall(call)
             await log.append("Consolidate → \(call.name)(\(shortArgs(call.args))) → \(result.preview)")
             let responseInput = formatToolResponse(call.name, result: result.full) + "<|turn>model\n"
-            response = try await runTurn(responseInput)
+            response = try await runTurn(responseInput, recordingInput: responseInput)
         }
 
         await log.append("Dream complete")
@@ -112,11 +106,12 @@ struct DreamAgent {
 
     // MARK: - Session turn
 
-    private func runTurn(_ input: String) async throws -> String {
+    private func runTurn(_ input: String, recordingInput: String) async throws -> String {
         var output = ""
         for try await chunk in engine.sessionGenerateStreaming(input: input) {
             output += chunk
         }
+        await log.appendRawTurn(input: recordingInput, output: output)
         return output
     }
 
@@ -137,26 +132,16 @@ struct DreamAgent {
         do {
             let result: String
             switch call.name {
-            case "list_wiki":
-                result = wikiStore.listWiki()
-            case "read_file":
-                result = wikiStore.readFile(path: cleanPath(call.args["path"] ?? ""))
-            case "write_file":
-                result = try wikiStore.writeFile(
-                    path: cleanPath(call.args["path"] ?? ""), content: call.args["content"] ?? ""
-                )
-            case "edit_file":
-                result = try wikiStore.editFile(
-                    path: cleanPath(call.args["path"] ?? ""),
-                    old: call.args["old"] ?? "",
-                    new: call.args["new"] ?? ""
-                )
-            case "delete_file":
-                result = try wikiStore.deleteFile(path: cleanPath(call.args["path"] ?? ""))
-            case "search_wiki":
-                result = wikiStore.searchWiki(query: call.args["query"] ?? "")
-            default:
-                result = "unknown tool: \(call.name)"
+            case "list_wiki":   result = wikiStore.listWiki()
+            case "read_file":   result = wikiStore.readFile(path: cleanPath(call.args["path"] ?? ""))
+            case "write_file":  result = try wikiStore.writeFile(
+                                    path: cleanPath(call.args["path"] ?? ""), content: call.args["content"] ?? "")
+            case "edit_file":   result = try wikiStore.editFile(
+                                    path: cleanPath(call.args["path"] ?? ""),
+                                    old: call.args["old"] ?? "", new: call.args["new"] ?? "")
+            case "delete_file": result = try wikiStore.deleteFile(path: cleanPath(call.args["path"] ?? ""))
+            case "search_wiki": result = wikiStore.searchWiki(query: call.args["query"] ?? "")
+            default:            result = "unknown tool: \(call.name)"
             }
             return ToolResult(full: result)
         } catch {
@@ -171,18 +156,14 @@ struct DreamAgent {
         s += "You are ispy's dreaming mind. ispy observes the world through images and maintains a personal wiki.\n\n"
         s += "Wiki writing style:\n"
         s += "- Write in FIRST PERSON: 'I saw...', 'I visited...', 'I noticed...', 'I encountered...'\n"
-        s += "- Include when you observed it: 'On [YYYY-MM-DD], I saw...' or 'I first noticed this on [date].'\n\n"
+        s += "- Include when: 'On [YYYY-MM-DD], I saw...' or 'I first noticed this on [date].'\n\n"
         s += "Wiki rules:\n"
-        s += "- Pages cover observable things only: places, recurring objects, themes, moods.\n"
+        s += "- Pages cover observable things: places, recurring objects, themes, moods.\n"
         s += "- Never name people — use descriptive labels like 'person in red jacket'.\n"
-        s += "- Each page: H1 title, first-person description paragraph, ## Connections section with [[wikilinks]], ## Sources section with [[memory:UUID]] links.\n"
-        s += "- Folder names should be ONE WORD, lowercase, and simple: places/, objects/, themes/, moods/, people/, cars/.\n"
-        s += "- NEVER use words like 'private', 'temp', 'misc', 'other' in folder names.\n"
-        s += "- When you link two pages together, add the [[wikilink]] to BOTH pages' ## Connections sections.\n\n"
-
-        if !visionContext.isEmpty {
-            s += "What I see when I look at this memory's photo:\n\(visionContext)\n\n"
-        }
+        s += "- Each page: H1 title, first-person paragraph, ## Connections with [[wikilinks]], ## Sources with [[memory:UUID]].\n"
+        s += "- Folder names: ONE WORD, lowercase. Use: places/, objects/, themes/, moods/, people/, cars/.\n"
+        s += "- NEVER use 'private', 'temp', 'misc', 'other' in folder names.\n"
+        s += "- When linking two pages, add [[wikilink]] to BOTH pages' ## Connections.\n\n"
 
         if !entropyPages.isEmpty {
             s += "Old memories surfaced for context:\n"
@@ -200,17 +181,10 @@ struct DreamAgent {
     private func buildConsolidationSystemPrompt() -> String {
         var s = "<|turn>system\n"
         s += "You are ispy's consolidating mind. Your job: organize the wiki for clarity and easy navigation.\n"
-        s += "Goals (in order of priority):\n"
-        s += "1. MERGE duplicate or near-duplicate pages into one clear page, then delete the old ones.\n"
-        s += "2. RENAME pages and folders to be clear and consistent — one word, lowercase, simple.\n"
-        s += "3. CONNECT related pages by adding [[wikilinks]] to BOTH pages' ## Connections sections.\n"
-        s += "4. RESTRUCTURE pages that are hard to navigate: clear H1 title, short description, ## Connections, ## Sources.\n"
         s += "Rules:\n"
-        s += "- Only reorganize existing pages, don't create new ones unless merging.\n"
         s += "- Folder names: ONE WORD, lowercase. Use: places/, objects/, themes/, moods/, people/, cars/.\n"
-        s += "- NEVER use 'private', 'temp', 'misc', 'other' in folder names.\n"
-        s += "- After merging, ensure the surviving page has all [[wikilinks]] from both merged pages.\n"
-        s += "- The goal is a wiki someone could navigate in a chat to quickly find relevant memories.\n\n"
+        s += "- NEVER use 'private', 'temp', 'misc', 'other'.\n"
+        s += "- When merging, keep all [[wikilinks]] and [[memory:UUID]] from both pages.\n\n"
         s += toolDeclarations()
         s += "<turn|>\n"
         return s

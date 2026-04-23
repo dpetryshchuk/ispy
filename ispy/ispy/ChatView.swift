@@ -21,8 +21,15 @@ struct ChatView: View {
             .navigationTitle("Chat")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Clear") { chatService.reset() }
-                        .disabled(chatService.messages.isEmpty)
+                    if chatService.messages.isEmpty {
+                        NavigationLink {
+                            ChatHistoryView(chatService: chatService)
+                        } label: {
+                            Image(systemName: "clock")
+                        }
+                    } else {
+                        Button("Clear") { chatService.reset() }
+                    }
                 }
             }
             .onChange(of: gemmaService.state) { _, _ in
@@ -174,5 +181,78 @@ extension ChatMessage.Role {
     var isAssistant: Bool {
         if case .assistant = self { return true }
         return false
+    }
+}
+
+// MARK: - Chat History
+
+struct ChatHistoryView: View {
+    let chatService: ChatService
+
+    var body: some View {
+        let sessions = chatService.savedSessions()
+        Group {
+            if sessions.isEmpty {
+                ContentUnavailableView(
+                    "No past chats",
+                    systemImage: "bubble.left.and.bubble.right",
+                    description: Text("Past conversations will appear here.")
+                )
+            } else {
+                List(sessions) { session in
+                    NavigationLink {
+                        ChatSessionView(session: session)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(session.startedAt, format: .dateTime.weekday(.wide).day().month().year())
+                                .font(.subheadline)
+                            Text(session.entries.first?.text ?? "")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .listStyle(.plain)
+            }
+        }
+        .navigationTitle("History")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+struct ChatSessionView: View {
+    let session: ChatSession
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 8) {
+                ForEach(session.entries.indices, id: \.self) { i in
+                    let entry = session.entries[i]
+                    if entry.role == "user" {
+                        HStack {
+                            Spacer(minLength: 60)
+                            Text(entry.text)
+                                .padding(.horizontal, 12).padding(.vertical, 8)
+                                .background(Color.accentColor)
+                                .foregroundStyle(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
+                        }
+                    } else {
+                        HStack {
+                            Text(entry.text)
+                                .padding(.horizontal, 12).padding(.vertical, 8)
+                                .background(Color(.secondarySystemBackground))
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
+                            Spacer(minLength: 60)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+        .navigationTitle(session.startedAt.formatted(.dateTime.weekday().day().month()))
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

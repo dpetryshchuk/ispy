@@ -102,8 +102,26 @@ struct DreamView: View {
 
 struct DreamSessionView: View {
     let session: DreamSession
+    @State private var showRaw = false
 
     var body: some View {
+        Group {
+            if showRaw {
+                rawLogView
+            } else {
+                narrativeLogView
+            }
+        }
+        .navigationTitle(session.startedAt.formatted(.dateTime.weekday().day().month()))
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button(showRaw ? "Summary" : "Raw") { showRaw.toggle() }
+            }
+        }
+    }
+
+    private var narrativeLogView: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 2) {
                 ForEach(session.entries, id: \.timestamp) { entry in
@@ -116,13 +134,72 @@ struct DreamSessionView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
-        .navigationTitle(session.startedAt.formatted(.dateTime.weekday().day().month()))
-        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var rawLogView: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 16) {
+                if session.rawTurns.isEmpty {
+                    Text("No raw turns recorded for this session.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding()
+                } else {
+                    ForEach(session.rawTurns) { turn in
+                        RawTurnCard(turn: turn)
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
     }
 
     private func timeString(_ date: Date) -> String {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss"
         return f.string(from: date)
+    }
+}
+
+private struct RawTurnCard: View {
+    let turn: RawTurn
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(turn.timestamp, format: .dateTime.hour().minute().second())
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                Button(expanded ? "Collapse" : "Expand") { expanded.toggle() }
+                    .font(.caption)
+            }
+
+            Group {
+                sectionLabel("INPUT")
+                Text(expanded ? turn.input : String(turn.input.prefix(200)) + (turn.input.count > 200 ? "…" : ""))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                sectionLabel("OUTPUT")
+                Text(expanded ? turn.output : String(turn.output.prefix(200)) + (turn.output.count > 200 ? "…" : ""))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(10)
+        .background(Color(.systemGray6))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+            .foregroundStyle(.tertiary)
+            .padding(.top, 2)
     }
 }
