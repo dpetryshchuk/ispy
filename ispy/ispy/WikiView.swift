@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import UIKit
 
 // Consistent color per folder name, hash-based so new folders get a stable color
@@ -17,7 +18,7 @@ struct WikiView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 Picker("View", selection: $showGraph) {
-                    Text("Files").tag(false)
+                    Text("Pages").tag(false)
                     Text("Map").tag(true)
                 }
                 .pickerStyle(.segmented)
@@ -30,7 +31,7 @@ struct WikiView: View {
                     WikiFilesView(wikiStore: wikiStore) { selectedPage = $0 }
                 }
             }
-            .navigationTitle("Wiki")
+            .navigationTitle("Memory")
             .sheet(item: $selectedPage) { page in
                 WikiPageView(page: page, wikiStore: wikiStore, memoryStore: memoryStore) { selectedPage = $0 }
             }
@@ -95,121 +96,154 @@ struct WikiGraphView: View {
     }
 }
 
+// MARK: - Live force-directed graph
+
 struct ForceGraph: View {
     let pages: [WikiPage]
     let onSelect: (WikiPage) -> Void
+
     @State private var positions: [String: CGPoint] = [:]
-    @State private var ready = false
+    @State private var velocities: [String: CGPoint] = [:]
+    @State private var dragging: String? = nil
+    @State private var seeded = false
+    @State private var settled = false
+
+    private let timer = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common).autoconnect()
 
     var body: some View {
         GeometryReader { geo in
-            ZStack {
-                ForEach(edges, id: \.id) { edge in
-                    if let a = positions[edge.a], let b = positions[edge.b] {
-                        Path { p in p.move(to: a); p.addLine(to: b) }
-                            .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
-                    }
+            let sz = geo.size
+            Canvas { ctx, _ in
+                // Draw edges
+                for edge in edges {
+                    guard let a = positions[edge.a], let b = positions[edge.b] else { continue }
+                    var path = Path()
+                    path.move(to: a); path.addLine(to: b)
+                    ctx.stroke(path, with: .color(.secondary.opacity(0.3)), lineWidth: 1)
                 }
+            }
+            .overlay {
+                // Draw nodes on top (need gesture + tap)
                 ForEach(pages) { page in
                     if let pos = positions[page.id] {
                         GraphNodeView(title: page.title, folder: page.folder, linkCount: page.links.count)
                             .position(pos)
-                            .gesture(DragGesture().onChanged { v in positions[page.id] = v.location })
+                            .gesture(
+                                DragGesture(minimumDistance: 4)
+                                    .onChanged { v in
+                                        dragging = page.id
+                                        settled = false
+                                        positions[page.id] = clamp(v.location, size: sz)
+                                        velocities[page.id] = .zero
+                                    }
+                                    .onEnded { _ in dragging = nil }
+                            )
                             .onTapGesture { onSelect(page) }
-                            .opacity(ready ? 1 : 0)
+                            .opacity(seeded ? 1 : 0)
                     }
                 }
             }
             .onAppear {
-                guard !ready else { return }
-                let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
-                // Seed in circle first so they're visible immediately, then simulate
-                seedPositions(center: center, size: geo.size)
-                ready = true
-                Task.detached(priority: .userInitiated) {
-                    let result = simulate(
-                        seed: await MainActor.run { positions },
-                        pages: pages,
-                        edges: edges,
-                        center: center,
-                        size: geo.size
-                    )
-                    await MainActor.run { positions = result }
-                }
+                guard !seeded else { return }
+                seed(size: sz)
+                seeded = true
+            }
+            .onReceive(timer) { _ in
+                guard seeded, !settled else { return }
+                let (newPos, newVel, done) = step(
+                    pos: positions, vel: velocities,
+                    pages: pages, edges: edges,
+                    center: CGPoint(x: sz.width / 2, y: sz.height / 2),
+                    size: sz, pinned: dragging
+                )
+                positions = newPos
+                velocities = newVel
+                settled = done
             }
         }
     }
 
-    private func seedPositions(center: CGPoint, size: CGSize) {
+    // MARK: - Seed
+
+    private func seed(size: CGSize) {
         let n = max(pages.count, 1)
-        let radius = min(size.width, size.height) * 0.35
+        let cx = size.width / 2, cy = size.height / 2
+        let r = min(size.width, size.height) * 0.33
         for (i, page) in pages.enumerated() {
             let angle = (Double(i) / Double(n)) * 2 * .pi
             positions[page.id] = CGPoint(
-                x: center.x + CGFloat(cos(angle)) * radius,
-                y: center.y + CGFloat(sin(angle)) * radius
+                x: cx + CGFloat(cos(angle)) * r + CGFloat.random(in: -8...8),
+                y: cy + CGFloat(sin(angle)) * r + CGFloat.random(in: -8...8)
             )
+            velocities[page.id] = .zero
         }
     }
 
-    // Nonisolated pure function — runs off main actor
-    private nonisolated func simulate(
-        seed: [String: CGPoint],
-        pages: [WikiPage],
-        edges: [GraphEdge],
-        center: CGPoint,
-        size: CGSize
-    ) -> [String: CGPoint] {
-        var pos = seed
-        var vel: [String: CGPoint] = Dictionary(uniqueKeysWithValues: pages.map { ($0.id, CGPoint.zero) })
+    // MARK: - Physics step (pure, called on main but fast)
 
-        let repulsion: CGFloat = 4000
-        let springLen: CGFloat = 120
-        let springK: CGFloat = 0.04
-        let damping: CGFloat = 0.75
-        let gravity: CGFloat = 0.015
+    private func step(
+        pos: [String: CGPoint], vel: [String: CGPoint],
+        pages: [WikiPage], edges: [GraphEdge],
+        center: CGPoint, size: CGSize, pinned: String?
+    ) -> ([String: CGPoint], [String: CGPoint], Bool) {
+        var p = pos
+        var v = vel
+        var forces: [String: CGPoint] = Dictionary(uniqueKeysWithValues: pages.map { ($0.id, .zero) })
 
-        for _ in 0..<300 {
-            var forces: [String: CGPoint] = Dictionary(uniqueKeysWithValues: pages.map { ($0.id, CGPoint.zero) })
+        let repulsion: CGFloat = 3500
+        let springLen: CGFloat = 110
+        let springK: CGFloat = 0.06
+        let damping: CGFloat = 0.78
+        let gravity: CGFloat = 0.012
 
-            // Repulsion
-            for i in 0..<pages.count {
-                for j in (i + 1)..<pages.count {
-                    let a = pages[i].id, b = pages[j].id
-                    guard let pa = pos[a], let pb = pos[b] else { continue }
-                    let dx = pa.x - pb.x, dy = pa.y - pb.y
-                    let d = max(hypot(dx, dy), 1)
-                    let f = repulsion / (d * d)
-                    forces[a]!.x += f * dx / d; forces[a]!.y += f * dy / d
-                    forces[b]!.x -= f * dx / d; forces[b]!.y -= f * dy / d
-                }
-            }
-
-            // Spring attraction along edges
-            for edge in edges {
-                guard let pa = pos[edge.a], let pb = pos[edge.b] else { continue }
-                let dx = pb.x - pa.x, dy = pb.y - pa.y
-                let d = max(hypot(dx, dy), 1)
-                let f = springK * (d - springLen)
-                forces[edge.a]!.x += f * dx / d; forces[edge.a]!.y += f * dy / d
-                forces[edge.b]!.x -= f * dx / d; forces[edge.b]!.y -= f * dy / d
-            }
-
-            // Integrate
-            for page in pages {
-                let id = page.id
-                guard var p = pos[id], var v = vel[id], let f = forces[id] else { continue }
-                // Degree-weighted gravity pulls connected nodes toward center
-                let deg = CGFloat(page.links.count + 1)
-                v.x = (v.x + f.x) * damping + (center.x - p.x) * gravity * deg
-                v.y = (v.y + f.y) * damping + (center.y - p.y) * gravity * deg
-                p.x = max(50, min(size.width - 50, p.x + v.x))
-                p.y = max(50, min(size.height - 50, p.y + v.y))
-                pos[id] = p; vel[id] = v
+        // Repulsion between all pairs
+        for i in 0..<pages.count {
+            for j in (i+1)..<pages.count {
+                let a = pages[i].id, b = pages[j].id
+                guard let pa = p[a], let pb = p[b] else { continue }
+                let dx = pa.x - pb.x, dy = pa.y - pb.y
+                let dist = max(hypot(dx, dy), 0.5)
+                let f = repulsion / (dist * dist)
+                let nx = f * dx / dist, ny = f * dy / dist
+                forces[a]!.x += nx; forces[a]!.y += ny
+                forces[b]!.x -= nx; forces[b]!.y -= ny
             }
         }
-        return pos
+
+        // Spring along edges
+        for edge in edges {
+            guard let pa = p[edge.a], let pb = p[edge.b] else { continue }
+            let dx = pb.x - pa.x, dy = pb.y - pa.y
+            let dist = max(hypot(dx, dy), 0.5)
+            let f = springK * (dist - springLen)
+            let nx = f * dx / dist, ny = f * dy / dist
+            forces[edge.a]!.x += nx; forces[edge.a]!.y += ny
+            forces[edge.b]!.x -= nx; forces[edge.b]!.y -= ny
+        }
+
+        // Integrate + gravity to center
+        var maxSpeed: CGFloat = 0
+        for page in pages {
+            let id = page.id
+            guard id != pinned,
+                  var pt = p[id], var vt = v[id], let ft = forces[id] else { continue }
+            let deg = CGFloat(page.links.count + 1)
+            vt.x = (vt.x + ft.x) * damping + (center.x - pt.x) * gravity * deg
+            vt.y = (vt.y + ft.y) * damping + (center.y - pt.y) * gravity * deg
+            pt = clamp(CGPoint(x: pt.x + vt.x, y: pt.y + vt.y), size: size)
+            p[id] = pt; v[id] = vt
+            maxSpeed = max(maxSpeed, hypot(vt.x, vt.y))
+        }
+
+        return (p, v, maxSpeed < 0.3)
     }
+
+    private func clamp(_ pt: CGPoint, size: CGSize) -> CGPoint {
+        CGPoint(x: max(60, min(size.width - 60, pt.x)),
+                y: max(60, min(size.height - 60, pt.y)))
+    }
+
+    // MARK: - Edge resolution: path match first, then title fuzzy
 
     struct GraphEdge: Identifiable {
         let id: String; let a: String; let b: String
@@ -218,18 +252,27 @@ struct ForceGraph: View {
     private var edges: [GraphEdge] {
         var result: [GraphEdge] = []
         var seen = Set<String>()
+        // Build lookup by both path and title (normalized)
+        var byPath: [String: String] = [:]   // normalizedPath → pageID
+        var byTitle: [String: String] = [:]  // normalizedTitle → pageID
+        for page in pages {
+            byPath[page.id.lowercased()] = page.id
+            byPath[page.path.lowercased()] = page.id
+            byTitle[page.title.lowercased()] = page.id
+        }
+
         for page in pages {
             for link in page.links {
-                let clean = link
-                    .replacingOccurrences(of: "[[", with: "")
-                    .replacingOccurrences(of: "]]", with: "")
-                    .trimmingCharacters(in: .whitespaces)
-                let linkId = clean.hasSuffix(".md") ? clean : clean + ".md"
-                guard pages.contains(where: { $0.id == linkId }) else { continue }
-                let key = [page.id, linkId].sorted().joined(separator: "—")
+                let clean = link.trimmingCharacters(in: .whitespaces)
+                // Try path match first (with and without .md)
+                let withMd = clean.hasSuffix(".md") ? clean.lowercased() : (clean + ".md").lowercased()
+                let withoutMd = clean.hasSuffix(".md") ? String(clean.dropLast(3)).lowercased() : clean.lowercased()
+                let targetId = byPath[withMd] ?? byPath[withoutMd] ?? byTitle[withoutMd]
+                guard let tid = targetId, tid != page.id else { continue }
+                let key = [page.id, tid].sorted().joined(separator: "—")
                 guard !seen.contains(key) else { continue }
                 seen.insert(key)
-                result.append(GraphEdge(id: key, a: page.id, b: linkId))
+                result.append(GraphEdge(id: key, a: page.id, b: tid))
             }
         }
         return result

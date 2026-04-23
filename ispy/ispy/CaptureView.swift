@@ -37,6 +37,7 @@ struct CaptureView: View {
                     modelStatusIndicator
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .onChange(of: photoItem) { _, newItem in
                 Task {
                     guard let newItem else { return }
@@ -119,7 +120,7 @@ struct CaptureView: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
-                    .frame(maxHeight: 300)
+                    .frame(maxHeight: 240)
                     .cornerRadius(10)
 
                 if isAnalyzing {
@@ -145,6 +146,8 @@ struct CaptureView: View {
                 if let error = errorMessage {
                     Text(error).foregroundStyle(.red).font(.caption).multilineTextAlignment(.center)
                 }
+                // Bottom padding so content stays visible above keyboard
+                Color.clear.frame(height: 120)
             }
             .padding()
         }

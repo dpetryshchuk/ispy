@@ -9,22 +9,33 @@ struct MindView: View {
     let gemmaService: GemmaVisionService
 
     @State private var selectedPage: WikiPage?
+    @State private var showGraph = false
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    knowledgeSection
-                    dreamNarrativeSection
+            VStack(spacing: 0) {
+                if showGraph {
+                    WikiGraphView(wikiStore: wikiStore) { selectedPage = $0 }
+                        .ignoresSafeArea(edges: .bottom)
+                } else {
+                    filesAndDreamView
                 }
             }
-            .navigationTitle("Mind")
+            .navigationTitle("Memory")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     NavigationLink {
                         ChatView(chatService: chatService, gemmaService: gemmaService)
                     } label: {
-                        Label("Chat", systemImage: "bubble.left.and.bubble.right")
+                        Image(systemName: "bubble.left.and.bubble.right")
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.3)) { showGraph.toggle() }
+                    } label: {
+                        Image(systemName: showGraph ? "list.bullet" : "map")
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
@@ -48,95 +59,141 @@ struct MindView: View {
         }
     }
 
-    // MARK: - Knowledge Graph Hero
+    // MARK: - Files + recent dream
 
-    private var knowledgeSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Knowledge")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal)
-                .padding(.top, 16)
+    private var filesAndDreamView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                // Dream status / active dream
+                if dreamService.isRunning {
+                    activeDreamBanner
+                } else if let error = dreamService.lastError {
+                    Text(error)
+                        .font(.caption).foregroundStyle(.red)
+                        .padding(.horizontal).padding(.top, 8)
+                }
 
-            WikiGraphView(wikiStore: wikiStore) { selectedPage = $0 }
-                .frame(height: 320)
+                // Wiki file browser
+                wikiFilesSection
 
-            Divider()
-                .padding(.top, 8)
+                // Recent dream narrative
+                if !dreamLog.savedSessions().isEmpty {
+                    recentDreamSection
+                }
+            }
         }
     }
 
-    // MARK: - Dream Narrative
+    private var activeDreamBanner: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                ProgressView().scaleEffect(0.75)
+                Text("Dreaming now")
+                    .font(.caption).foregroundStyle(.purple)
+            }
 
-    private var dreamNarrativeSection: some View {
-        VStack(alignment: .leading, spacing: 20) {
+            let recent = Array(dreamLog.entries.suffix(6))
+            ForEach(recent) { entry in
+                Text("[\(entry.timeString)] \(entry.message)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding()
+        .background(Color(.secondarySystemBackground))
+    }
+
+    private var wikiFilesSection: some View {
+        let pages = wikiStore.allPages().sorted { $0.path < $1.path }
+        let grouped = Dictionary(grouping: pages) { $0.folder }
+        let folders = grouped.keys.sorted()
+
+        return Group {
+            if pages.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "brain")
+                        .font(.system(size: 36))
+                        .foregroundStyle(.tertiary)
+                    Text("Nothing stored yet")
+                        .font(.subheadline).foregroundStyle(.tertiary)
+                    Text("Tap Dream to start building memory")
+                        .font(.caption).foregroundStyle(.quaternary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 60)
+            } else {
+                ForEach(folders, id: \.self) { folder in
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "folder.fill")
+                                .font(.caption2)
+                                .foregroundStyle(folderColor(folder))
+                            Text(folder.capitalized)
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(folderColor(folder))
+                        }
+                        .padding(.horizontal)
+                        .padding(.top, 16)
+                        .padding(.bottom, 4)
+
+                        ForEach(grouped[folder] ?? []) { page in
+                            Button {
+                                selectedPage = page
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Circle()
+                                        .fill(folderColor(folder).opacity(0.6))
+                                        .frame(width: 6, height: 6)
+                                    Text(page.title)
+                                        .foregroundStyle(.primary)
+                                        .font(.subheadline)
+                                    Spacer()
+                                    if !page.links.isEmpty {
+                                        Text("\(page.links.count)")
+                                            .font(.caption2)
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2).foregroundStyle(.quaternary)
+                                }
+                                .padding(.vertical, 9)
+                                .padding(.horizontal)
+                            }
+                            Divider().padding(.leading)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var recentDreamSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("What ispy thought about")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
+                Text("Recent processing")
+                    .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 NavigationLink {
                     DreamHistoryView(dreamLog: dreamLog, dreamService: dreamService, memoryStore: memoryStore)
                 } label: {
                     Text("All sessions")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(.tertiary)
                 }
             }
             .padding(.horizontal)
             .padding(.top, 20)
 
-            if let error = dreamService.lastError, !dreamService.isRunning {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .padding(.horizontal)
-            }
-
-            if dreamService.isRunning {
-                activeDreamSection
-            }
-
-            let sessions = recentSessions
-            if sessions.isEmpty && !dreamService.isRunning {
-                Text("No dreams yet. Tap Dream to start.")
-                    .font(.subheadline)
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal)
-            } else {
-                ForEach(sessions) { session in
-                    DreamNarrativeCard(session: session)
-                }
+            let session = dreamLog.savedSessions().first
+            if let session {
+                DreamNarrativeCard(session: session)
             }
         }
-        .padding(.bottom, 48)
-    }
-
-    private var activeDreamSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                ProgressView().scaleEffect(0.75)
-                Text("Dreaming now")
-                    .font(.caption)
-                    .foregroundStyle(.purple)
-            }
-            .padding(.horizontal)
-
-            let recent = Array(dreamLog.entries.suffix(8))
-            ForEach(recent) { entry in
-                NarrativeEntryRow(timestamp: entry.timeString, message: entry.message)
-            }
-
-            Divider().padding(.top, 4)
-        }
-    }
-
-    private var recentSessions: [DreamSession] {
-        Array(dreamLog.savedSessions().prefix(5))
+        .padding(.bottom, 40)
     }
 }
 
-// MARK: - Narrative Entry Row
+// MARK: - Narrative Entry Row (shared)
 
 private struct NarrativeEntryRow: View {
     let timestamp: String
@@ -165,7 +222,7 @@ struct DreamNarrativeCard: View {
     let session: DreamSession
     @State private var expanded = false
 
-    private let previewCount = 6
+    private let previewCount = 4
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -185,8 +242,7 @@ struct DreamNarrativeCard: View {
                     withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
                 } label: {
                     Text(expanded ? "Show less" : "\(session.entries.count - previewCount) more…")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .font(.caption).foregroundStyle(.tertiary)
                 }
                 .padding(.horizontal)
             }

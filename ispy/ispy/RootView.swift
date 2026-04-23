@@ -64,12 +64,12 @@ struct RootView: View {
                 .tabItem { Label("Capture", systemImage: "camera.fill") }
                 .tag(1)
 
-            // MARK: Feed
+            // MARK: Salients (raw captures)
             MemoryView(memoryStore: memoryStore, lastDreamed: wikiStore.lastDreamed)
-                .tabItem { Label("Feed", systemImage: "photo.stack") }
+                .tabItem { Label("Salients", systemImage: "photo.stack") }
                 .tag(2)
 
-            // MARK: Mind (wiki + dream + chat)
+            // MARK: Memory (knowledge base + dream + chat)
             MindView(
                 wikiStore: wikiStore,
                 memoryStore: memoryStore,
@@ -78,7 +78,7 @@ struct RootView: View {
                 chatService: chatService,
                 gemmaService: gemmaService
             )
-            .tabItem { Label("Mind", systemImage: "sparkles") }
+            .tabItem { Label("Memory", systemImage: "sparkles") }
             .tag(3)
         }
         .sheet(isPresented: $showDevSettings) {

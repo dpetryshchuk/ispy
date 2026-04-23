@@ -46,7 +46,7 @@ struct DreamAgent {
             }
         }
 
-        try await engine.openSession(temperature: 0.3, maxTokens: 512)
+        try await engine.openSession(temperature: 0.3, maxTokens: 1024)
         defer { engine.closeSession() }
 
         let systemBlock = buildMemorySystemPrompt(entropyPages: entropyPages, visionContext: visionContext)
@@ -79,7 +79,7 @@ struct DreamAgent {
     // MARK: - Consolidation pass
 
     private func runConsolidationPass() async throws {
-        try await engine.openSession(temperature: 0.3, maxTokens: 512)
+        try await engine.openSession(temperature: 0.3, maxTokens: 1024)
         defer { engine.closeSession() }
 
         let index = wikiStore.listWiki()
@@ -132,16 +132,16 @@ struct DreamAgent {
         do {
             let result: String
             switch call.name {
-            case "list_wiki":   result = wikiStore.listWiki()
-            case "read_file":   result = wikiStore.readFile(path: cleanPath(call.args["path"] ?? ""))
-            case "write_file":  result = try wikiStore.writeFile(
-                                    path: cleanPath(call.args["path"] ?? ""), content: call.args["content"] ?? "")
-            case "edit_file":   result = try wikiStore.editFile(
-                                    path: cleanPath(call.args["path"] ?? ""),
-                                    old: call.args["old"] ?? "", new: call.args["new"] ?? "")
-            case "delete_file": result = try wikiStore.deleteFile(path: cleanPath(call.args["path"] ?? ""))
-            case "search_wiki": result = wikiStore.searchWiki(query: call.args["query"] ?? "")
-            default:            result = "unknown tool: \(call.name)"
+            case "list_memory":   result = wikiStore.listWiki()
+            case "read_file":     result = wikiStore.readFile(path: cleanPath(call.args["path"] ?? ""))
+            case "write_file":    result = try wikiStore.writeFile(
+                                      path: cleanPath(call.args["path"] ?? ""), content: call.args["content"] ?? "")
+            case "edit_file":     result = try wikiStore.editFile(
+                                      path: cleanPath(call.args["path"] ?? ""),
+                                      old: call.args["old"] ?? "", new: call.args["new"] ?? "")
+            case "delete_file":   result = try wikiStore.deleteFile(path: cleanPath(call.args["path"] ?? ""))
+            case "search_memory": result = wikiStore.searchWiki(query: call.args["query"] ?? "")
+            default:              result = "unknown tool: \(call.name)"
             }
             return ToolResult(full: result)
         } catch {
@@ -153,17 +153,17 @@ struct DreamAgent {
 
     private func buildMemorySystemPrompt(entropyPages: [String], visionContext: String = "") -> String {
         var s = "<|turn>system\n"
-        s += "You are ispy's dreaming mind. ispy observes the world through images and maintains a personal wiki.\n\n"
-        s += "Wiki writing style:\n"
+        s += "You are ispy's dreaming mind. ispy observes the world through images and maintains a personal memory.\n\n"
+        s += "Memory writing style:\n"
         s += "- Write in FIRST PERSON: 'I saw...', 'I visited...', 'I noticed...', 'I encountered...'\n"
         s += "- Include when: 'On [YYYY-MM-DD], I saw...' or 'I first noticed this on [date].'\n\n"
-        s += "Wiki rules:\n"
+        s += "Memory rules:\n"
         s += "- Pages cover observable things: places, recurring objects, themes, moods.\n"
         s += "- Never name people — use descriptive labels like 'person in red jacket'.\n"
-        s += "- Each page: H1 title, first-person paragraph, ## Connections with [[wikilinks]], ## Sources with [[memory:UUID]].\n"
+        s += "- Each page: H1 title, first-person paragraph, ## Connections with [[links]], ## Sources with [[memory:UUID]].\n"
         s += "- Folder names: ONE WORD, lowercase. Use: places/, objects/, themes/, moods/, people/, cars/.\n"
         s += "- NEVER use 'private', 'temp', 'misc', 'other' in folder names.\n"
-        s += "- When linking two pages, add [[wikilink]] to BOTH pages' ## Connections.\n\n"
+        s += "- When linking two pages, add [[link]] to BOTH pages' ## Connections.\n\n"
 
         if !entropyPages.isEmpty {
             s += "Old memories surfaced for context:\n"
@@ -180,11 +180,11 @@ struct DreamAgent {
 
     private func buildConsolidationSystemPrompt() -> String {
         var s = "<|turn>system\n"
-        s += "You are ispy's consolidating mind. Your job: organize the wiki for clarity and easy navigation.\n"
+        s += "You are ispy's consolidating mind. Your job: organize ispy's memory for clarity and easy navigation.\n"
         s += "Rules:\n"
         s += "- Folder names: ONE WORD, lowercase. Use: places/, objects/, themes/, moods/, people/, cars/.\n"
         s += "- NEVER use 'private', 'temp', 'misc', 'other'.\n"
-        s += "- When merging, keep all [[wikilinks]] and [[memory:UUID]] from both pages.\n\n"
+        s += "- When merging, keep all [[links]] and [[memory:UUID]] from both pages.\n\n"
         s += toolDeclarations()
         s += "<turn|>\n"
         return s
@@ -193,29 +193,29 @@ struct DreamAgent {
     private func toolDeclarations() -> String {
         let q = strQ
         return """
-        <|tool>declaration:list_wiki
-        description:\(q)List all pages in the wiki index\(q)
-        ,parameters:{properties:{},required:[],type:\(q)OBJECT\(q)},response:{description:\(q)Wiki index markdown\(q),type:\(q)STRING\(q)}
+        <|tool>declaration:list_memory
+        description:\(q)List all pages in ispy's memory\(q)
+        ,parameters:{properties:{},required:[],type:\(q)OBJECT\(q)},response:{description:\(q)Memory index\(q),type:\(q)STRING\(q)}
         <tool|>
         <|tool>declaration:read_file
-        description:\(q)Read a wiki page by path (relative to wiki/)\(q)
+        description:\(q)Read a memory page by path\(q)
         ,parameters:{properties:{path:{description:\(q)e.g. places/coffee-shop.md\(q),type:\(q)STRING\(q)}},required:[\(q)path\(q)],type:\(q)OBJECT\(q)},response:{description:\(q)File contents\(q),type:\(q)STRING\(q)}
         <tool|>
         <|tool>declaration:write_file
-        description:\(q)Create or overwrite a wiki page\(q)
+        description:\(q)Create or overwrite a memory page\(q)
         ,parameters:{properties:{path:{description:\(q)File path e.g. places/name.md\(q),type:\(q)STRING\(q)},content:{description:\(q)Full markdown content\(q),type:\(q)STRING\(q)}},required:[\(q)path\(q),\(q)content\(q)],type:\(q)OBJECT\(q)},response:{description:\(q)ok or error\(q),type:\(q)STRING\(q)}
         <tool|>
         <|tool>declaration:edit_file
-        description:\(q)Replace a section in an existing wiki page\(q)
+        description:\(q)Replace a section in an existing memory page\(q)
         ,parameters:{properties:{path:{description:\(q)File path\(q),type:\(q)STRING\(q)},old:{description:\(q)Exact text to find and replace\(q),type:\(q)STRING\(q)},new:{description:\(q)Replacement text\(q),type:\(q)STRING\(q)}},required:[\(q)path\(q),\(q)old\(q),\(q)new\(q)],type:\(q)OBJECT\(q)},response:{description:\(q)ok or error\(q),type:\(q)STRING\(q)}
         <tool|>
         <|tool>declaration:delete_file
-        description:\(q)Delete a wiki page by path\(q)
+        description:\(q)Delete a memory page by path\(q)
         ,parameters:{properties:{path:{description:\(q)File path e.g. places/name.md\(q),type:\(q)STRING\(q)}},required:[\(q)path\(q)],type:\(q)OBJECT\(q)},response:{description:\(q)ok or error\(q),type:\(q)STRING\(q)}
         <tool|>
-        <|tool>declaration:search_wiki
-        description:\(q)Full-text search across all wiki pages\(q)
-        ,parameters:{properties:{query:{description:\(q)Search terms\(q),type:\(q)STRING\(q)}},required:[\(q)query\(q)],type:\(q)OBJECT\(q)},response:{description:\(q)Matching filenames and first-line snippets\(q),type:\(q)STRING\(q)}
+        <|tool>declaration:search_memory
+        description:\(q)Full-text search across all memory pages\(q)
+        ,parameters:{properties:{query:{description:\(q)Search terms\(q),type:\(q)STRING\(q)}},required:[\(q)query\(q)],type:\(q)OBJECT\(q)},response:{description:\(q)Matching pages and snippets\(q),type:\(q)STRING\(q)}
         <tool|>
         """
     }

@@ -61,60 +61,58 @@ struct IspyView: View {
         VStack(spacing: 0) {
             Spacer()
 
-            // Shape with hunger badge
-            ZStack(alignment: .topTrailing) {
-                IspyShapeView(stageIndex: stageIndex, size: 160)
-                    .scaleEffect(pulse ? 1.04 : 1.0)
-                    .opacity(isDreaming ? (pulse ? 0.6 : 1.0) : 1.0)
-                    .animation(
-                        (isDreaming || pendingCount > 0)
-                            ? .easeInOut(duration: pulseSpeed).repeatForever(autoreverses: true)
-                            : .spring(duration: 0.6),
-                        value: pulse
-                    )
-                    .animation(.spring(duration: 0.6), value: stageIndex)
+            IspyShapeView(stageIndex: stageIndex, size: 160)
+                .scaleEffect(pulse ? 1.04 : 1.0)
+                .opacity(isDreaming ? (pulse ? 0.55 : 1.0) : 1.0)
+                .animation(
+                    (isDreaming || pendingCount > 0)
+                        ? .easeInOut(duration: pulseSpeed).repeatForever(autoreverses: true)
+                        : .spring(duration: 0.6),
+                    value: pulse
+                )
+                .animation(.spring(duration: 0.6), value: stageIndex)
+                .onAppear { pulse = isDreaming || pendingCount > 0 }
+                .onChange(of: isDreaming) { _, _ in pulse = isDreaming || pendingCount > 0 }
+                .onChange(of: pendingCount) { _, _ in pulse = isDreaming || pendingCount > 0 }
+                .padding(.bottom, 14)
 
-                if pendingCount > 0 && !isDreaming {
-                    Text("\(pendingCount)")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.orange)
-                        .clipShape(Capsule())
-                        .offset(x: 4, y: -4)
-                }
-            }
-            .onAppear { pulse = isDreaming || pendingCount > 0 }
-            .onChange(of: isDreaming) { _, _ in pulse = isDreaming || pendingCount > 0 }
-            .onChange(of: pendingCount) { _, _ in pulse = isDreaming || pendingCount > 0 }
-            .padding(.bottom, 14)
-
-            // Stage label
             Text(isDreaming ? "dreaming…" : stages[stageIndex].label)
                 .font(.system(.caption, design: .monospaced))
                 .foregroundStyle(.secondary)
 
-            if nextThreshold > 0 && devStageOverride == nil {
+            // Pending indicator — small dot row, not overlapping the shape
+            if pendingCount > 0 && !isDreaming && devStageOverride == nil {
+                HStack(spacing: 4) {
+                    ForEach(0..<min(pendingCount, 7), id: \.self) { _ in
+                        Circle().fill(Color.orange.opacity(0.7)).frame(width: 4, height: 4)
+                    }
+                    if pendingCount > 7 {
+                        Text("+\(pendingCount - 7)")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.orange.opacity(0.7))
+                    }
+                }
+                .padding(.top, 6)
+            } else if nextThreshold > 0 && devStageOverride == nil {
                 Text("\(nextThreshold - captureCount) until next form")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
-                    .padding(.top, 2)
+                    .padding(.top, 4)
+            } else {
+                Color.clear.frame(height: 16)
             }
 
             Spacer()
 
-            // Stats
             HStack(spacing: 40) {
-                StatCounter(label: "captures", value: captureCount)
-                StatCounter(label: "pages", value: wikiPageCount)
+                StatCounter(label: "seen", value: captureCount)
+                StatCounter(label: "known", value: wikiPageCount)
                 StatCounter(label: "links", value: connectionCount)
             }
             .padding(.bottom, 8)
 
-            // Last dreamed indicator
             if let date = lastDreamed {
-                Text("dreamed \(date, format: .relative(presentation: .named))")
+                Text("processed \(date, format: .relative(presentation: .named))")
                     .font(.system(size: 10))
                     .foregroundStyle(.quaternary)
                     .padding(.bottom, 32)
@@ -122,7 +120,7 @@ struct IspyView: View {
                 Color.clear.frame(height: 32)
             }
         }
-        .padding()
+        .padding(.horizontal)
     }
 }
 

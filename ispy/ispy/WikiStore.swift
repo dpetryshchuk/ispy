@@ -25,7 +25,14 @@ final class WikiStore {
 
     init() {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        wikiDir = docs.appendingPathComponent("wiki")
+        // Migrate wiki/ → memory/ on first run after rename
+        let oldWiki = docs.appendingPathComponent("wiki")
+        let newMemory = docs.appendingPathComponent("memory")
+        if FileManager.default.fileExists(atPath: oldWiki.path),
+           !FileManager.default.fileExists(atPath: newMemory.path) {
+            try? FileManager.default.moveItem(at: oldWiki, to: newMemory)
+        }
+        wikiDir = newMemory
         dreamStateURL = docs.appendingPathComponent("dream.json")
         cacheURL = docs.appendingPathComponent("cache.json")
         ensureWikiIndex()
@@ -228,7 +235,7 @@ final class WikiStore {
     private func ensureWikiIndex() {
         let url = wikiDir.appendingPathComponent("index.md")
         guard !FileManager.default.fileExists(atPath: url.path) else { return }
-        try? "# Wiki Index\n\n(ispy's wiki — tap Dream to start)\n"
+        try? "# Memory Index\n\n(ispy's memory — tap Dream to start)\n"
             .write(to: url, atomically: true, encoding: .utf8)
     }
 
@@ -245,7 +252,7 @@ final class WikiStore {
             pages.append(String(p.dropFirst(base.count)))
         }
         pages.sort()
-        let content = "# Wiki Index\n\n" + pages.map { "- [[\($0)]]" }.joined(separator: "\n") + "\n"
+        let content = "# Memory Index\n\n" + pages.map { "- [[\($0)]]" }.joined(separator: "\n") + "\n"
         try? content.write(
             to: wikiDir.appendingPathComponent("index.md"), atomically: true, encoding: .utf8
         )

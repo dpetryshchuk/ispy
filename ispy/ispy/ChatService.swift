@@ -65,7 +65,7 @@ final class ChatService {
 
         do {
             if !sessionOpen {
-                try await engine.openSession(temperature: 0.7, maxTokens: 768)
+                try await engine.openSession(temperature: 0.7, maxTokens: 1536)
                 sessionOpen = true
                 firstTurn = true
             }
@@ -174,7 +174,7 @@ final class ChatService {
         do {
             let result: String
             switch call.name {
-            case "list_wiki":
+            case "list_memory":
                 result = wikiStore.listWiki()
             case "read_file":
                 result = wikiStore.readFile(path: cleanPath(call.args["path"] ?? ""))
@@ -190,12 +190,12 @@ final class ChatService {
                 )
             case "delete_file":
                 result = try wikiStore.deleteFile(path: cleanPath(call.args["path"] ?? ""))
-            case "search_wiki":
+            case "search_memory":
                 result = wikiStore.searchWiki(query: call.args["query"] ?? "")
-            case "list_memories":
-                result = listMemories()
-            case "read_memory":
-                result = readMemory(id: call.args["id"] ?? "")
+            case "list_salients":
+                result = listSalients()
+            case "read_salient":
+                result = readSalient(id: call.args["id"] ?? "")
             default:
                 result = "unknown tool: \(call.name)"
             }
@@ -205,23 +205,23 @@ final class ChatService {
         }
     }
 
-    private func listMemories() -> String {
+    private func listSalients() -> String {
         let entries = memoryStore.entries.suffix(50)
-        if entries.isEmpty { return "(no memories yet)" }
+        if entries.isEmpty { return "(no observations yet)" }
         return entries.map { e in
             "[\(e.id.uuidString)] \(e.timestamp.formatted(.iso8601)) — \(String(e.description.prefix(80)))"
         }.joined(separator: "\n")
     }
 
-    private func readMemory(id: String) -> String {
+    private func readSalient(id: String) -> String {
         guard let uuid = UUID(uuidString: id),
               let entry = memoryStore.entries.first(where: { $0.id == uuid }) else {
-            return "(memory not found: \(id))"
+            return "(observation not found: \(id))"
         }
         var s = "ID: \(entry.id.uuidString)\n"
-        s += "Timestamp: \(entry.timestamp.formatted(.iso8601))\n"
+        s += "Observed: \(entry.timestamp.formatted(.iso8601))\n"
         s += "Description: \(entry.description)\n"
-        if let dream = entry.dreamDescription { s += "Dream notes: \(dream)\n" }
+        if let dream = entry.dreamDescription { s += "Processed notes: \(dream)\n" }
         return s
     }
 
@@ -238,37 +238,37 @@ final class ChatService {
     private func toolDeclarations() -> String {
         let q = strQ
         return """
-        <|tool>declaration:list_wiki
-        description:\(q)List all pages in the wiki index\(q)
-        ,parameters:{properties:{},required:[],type:\(q)OBJECT\(q)},response:{description:\(q)Wiki index\(q),type:\(q)STRING\(q)}
+        <|tool>declaration:list_memory
+        description:\(q)List all pages in ispy's memory\(q)
+        ,parameters:{properties:{},required:[],type:\(q)OBJECT\(q)},response:{description:\(q)Memory index\(q),type:\(q)STRING\(q)}
         <tool|>
         <|tool>declaration:read_file
-        description:\(q)Read a wiki page by path (relative to wiki/)\(q)
-        ,parameters:{properties:{path:{description:\(q)e.g. places/coffee-shop.md\(q),type:\(q)STRING\(q)}},required:[\(q)path\(q)],type:\(q)OBJECT\(q)},response:{description:\(q)File contents\(q),type:\(q)STRING\(q)}
+        description:\(q)Read a memory page by path\(q)
+        ,parameters:{properties:{path:{description:\(q)e.g. places/coffee-shop.md\(q),type:\(q)STRING\(q)}},required:[\(q)path\(q)],type:\(q)OBJECT\(q)},response:{description:\(q)Page contents\(q),type:\(q)STRING\(q)}
         <tool|>
-        <|tool>declaration:search_wiki
-        description:\(q)Full-text search across all wiki pages\(q)
-        ,parameters:{properties:{query:{description:\(q)Search terms\(q),type:\(q)STRING\(q)}},required:[\(q)query\(q)],type:\(q)OBJECT\(q)},response:{description:\(q)Matching filenames and snippets\(q),type:\(q)STRING\(q)}
+        <|tool>declaration:search_memory
+        description:\(q)Full-text search across all memory pages\(q)
+        ,parameters:{properties:{query:{description:\(q)Search terms\(q),type:\(q)STRING\(q)}},required:[\(q)query\(q)],type:\(q)OBJECT\(q)},response:{description:\(q)Matching pages and snippets\(q),type:\(q)STRING\(q)}
         <tool|>
         <|tool>declaration:write_file
-        description:\(q)Create or overwrite a wiki page\(q)
+        description:\(q)Create or overwrite a memory page\(q)
         ,parameters:{properties:{path:{description:\(q)File path\(q),type:\(q)STRING\(q)},content:{description:\(q)Full markdown content\(q),type:\(q)STRING\(q)}},required:[\(q)path\(q),\(q)content\(q)],type:\(q)OBJECT\(q)},response:{description:\(q)ok or error\(q),type:\(q)STRING\(q)}
         <tool|>
         <|tool>declaration:edit_file
-        description:\(q)Replace a section in an existing wiki page\(q)
+        description:\(q)Replace a section in an existing memory page\(q)
         ,parameters:{properties:{path:{description:\(q)File path\(q),type:\(q)STRING\(q)},old:{description:\(q)Exact text to find and replace\(q),type:\(q)STRING\(q)},new:{description:\(q)Replacement text\(q),type:\(q)STRING\(q)}},required:[\(q)path\(q),\(q)old\(q),\(q)new\(q)],type:\(q)OBJECT\(q)},response:{description:\(q)ok or error\(q),type:\(q)STRING\(q)}
         <tool|>
         <|tool>declaration:delete_file
-        description:\(q)Delete a wiki page\(q)
+        description:\(q)Delete a memory page\(q)
         ,parameters:{properties:{path:{description:\(q)File path\(q),type:\(q)STRING\(q)}},required:[\(q)path\(q)],type:\(q)OBJECT\(q)},response:{description:\(q)ok or error\(q),type:\(q)STRING\(q)}
         <tool|>
-        <|tool>declaration:list_memories
-        description:\(q)List recent memory captures (up to 50)\(q)
-        ,parameters:{properties:{},required:[],type:\(q)OBJECT\(q)},response:{description:\(q)List of memory entries with IDs and timestamps\(q),type:\(q)STRING\(q)}
+        <|tool>declaration:list_salients
+        description:\(q)List recent raw observations (up to 50)\(q)
+        ,parameters:{properties:{},required:[],type:\(q)OBJECT\(q)},response:{description:\(q)Observation list with IDs and timestamps\(q),type:\(q)STRING\(q)}
         <tool|>
-        <|tool>declaration:read_memory
-        description:\(q)Read a specific memory entry by UUID\(q)
-        ,parameters:{properties:{id:{description:\(q)Memory UUID\(q),type:\(q)STRING\(q)}},required:[\(q)id\(q)],type:\(q)OBJECT\(q)},response:{description:\(q)Memory details\(q),type:\(q)STRING\(q)}
+        <|tool>declaration:read_salient
+        description:\(q)Read a specific raw observation by UUID\(q)
+        ,parameters:{properties:{id:{description:\(q)Observation UUID\(q),type:\(q)STRING\(q)}},required:[\(q)id\(q)],type:\(q)OBJECT\(q)},response:{description:\(q)Observation details\(q),type:\(q)STRING\(q)}
         <tool|>
         """
     }
