@@ -67,7 +67,8 @@ final class GemmaVisionService {
 
     func describe(image: UIImage) async throws -> String {
         guard let engine, state == .ready else { throw GemmaVisionError.notLoaded }
-        guard let imageData = image.jpegData(compressionQuality: 0.85) else {
+        let small = image.downscaled(maxDimension: 768)
+        guard let imageData = small.jpegData(compressionQuality: 0.8) else {
             throw GemmaVisionError.invalidImage
         }
         return try await engine.vision(
@@ -75,6 +76,17 @@ final class GemmaVisionService {
             prompt: "Describe this image in detail. Include the main subject, setting, mood, and any notable details.",
             maxTokens: 400
         )
+    }
+}
+
+private extension UIImage {
+    func downscaled(maxDimension: CGFloat) -> UIImage {
+        let longest = max(size.width, size.height)
+        guard longest > maxDimension else { return self }
+        let scale = maxDimension / longest
+        let newSize = CGSize(width: (size.width * scale).rounded(), height: (size.height * scale).rounded())
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        return renderer.image { _ in draw(in: CGRect(origin: .zero, size: newSize)) }
     }
 }
 
