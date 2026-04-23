@@ -176,6 +176,9 @@ Describe everything you observe with rich, specific detail. Be exhaustive — ev
 
     // MARK: - Persistence
 
+    // Bump this when any default prompt changes — forces a one-time reset on next launch.
+    private static let currentVersion = 3
+
     private static let url: URL = {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         return docs.appendingPathComponent("prompt_config.json")
@@ -185,6 +188,7 @@ Describe everything you observe with rich, specific detail. Be exhaustive — ev
 
     func save() {
         let dict: [String: String] = [
+            "version": "\(Self.currentVersion)",
             "memoryExtraInstructions": memoryExtraInstructions,
             "consolidationExtraInstructions": consolidationExtraInstructions,
             "reflectionInstructions": reflectionInstructions,
@@ -206,6 +210,12 @@ Describe everything you observe with rich, specific detail. Be exhaustive — ev
     private func load() {
         guard let data = try? Data(contentsOf: Self.url),
               let dict = try? JSONDecoder().decode([String: String].self, from: data) else { return }
+        // Auto-reset if the saved config is from an older version
+        let savedVersion = Int(dict["version"] ?? "0") ?? 0
+        if savedVersion < Self.currentVersion {
+            resetToDefaults()
+            return
+        }
         if let v = dict["memoryExtraInstructions"] { memoryExtraInstructions = v }
         if let v = dict["consolidationExtraInstructions"] { consolidationExtraInstructions = v }
         if let v = dict["reflectionInstructions"] { reflectionInstructions = v }
