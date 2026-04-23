@@ -63,6 +63,8 @@ final class ChatService {
         error = nil
         defer { isThinking = false }
 
+        var compacted = false
+
         do {
             if !sessionOpen {
                 try await engine.openSession(temperature: 0.7, maxTokens: 24576)
@@ -78,7 +80,13 @@ final class ChatService {
                 turnInput = "<|turn>user\n\(text)<turn|>\n<|turn>model\n"
             }
 
-            var response = try await streamTurn(turnInput)
+            var response: String
+            do {
+                response = try await streamTurn(turnInput)
+            } catch {
+                if isTokenError(error) { response = try await compactAndResend(text: text, engine: engine); compacted = true }
+                else { throw error }
+            }
 
             for _ in 0..<maxToolIter {
                 let clean = stripThinking(response)
@@ -86,12 +94,50 @@ final class ChatService {
                 let result = executeToolCall(call)
                 messages.append(ChatMessage(role: .tool(name: call.name), text: result.preview))
                 let next = formatToolResponse(call.name, result: result.full) + "<|turn>model\n"
-                response = try await streamTurn(next)
+                do {
+                    response = try await streamTurn(next)
+                } catch {
+                    if isTokenError(error) && !compacted {
+                        response = try await compactAndResend(text: text, engine: engine); compacted = true
+                    } else { throw error }
+                }
             }
         } catch {
             self.error = error.localizedDescription
             sessionOpen = false
         }
+    }
+
+    private func isTokenError(_ error: Error) -> Bool {
+        let msg = error.localizedDescription.lowercased()
+        return msg.contains("token") || msg.contains("context") || msg.contains("length") ||
+               msg.contains("limit") || msg.contains("overflow") || msg.contains("kv")
+    }
+
+    private func compactAndResend(text: String, engine: LiteRTLMEngine) async throws -> String {
+        engine.closeSession()
+        sessionOpen = false
+
+        // Build a compact conversation history from prior messages
+        let history = messages.compactMap { msg -> String? in
+            switch msg.role {
+            case .user: return "User: \(msg.text)"
+            case .assistant where !msg.text.isEmpty: return "ispy: \(msg.text)"
+            default: return nil
+            }
+        }.dropLast().joined(separator: "\n")  // dropLast = current user turn already appended
+
+        try await engine.openSession(temperature: 0.7, maxTokens: 24576)
+        sessionOpen = true
+        firstTurn = false
+
+        let compactPrompt = buildSystemPrompt() +
+            "<|turn>user\n" +
+            (history.isEmpty ? "" : "Earlier in this conversation:\n\(history)\n\n") +
+            "Continue from where we left off. Respond to: \(text)" +
+            "<turn|>\n<|turn>model\n"
+
+        return try await streamTurn(compactPrompt)
     }
 
     func reset() {
