@@ -12,7 +12,7 @@ struct DreamAgent {
     let log: DreamLog
     let promptConfig: PromptConfig
 
-    private let maxIterMemory = 16
+    private let maxIterMemory = 32
     private let maxIterReflection = 16
     private let maxIterConsolidation = 50
     private let strQ = "<|\u{22}|>"
