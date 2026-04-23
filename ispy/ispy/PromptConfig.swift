@@ -19,9 +19,10 @@ You MUST perform all of these steps — do not skip any:
 Work through these in order:
 1. Call list_memory. Identify groups of pages that cover the same topic.
 2. For each group, read_file all members, merge into one page with write_file, delete the duplicates.
-3. Read pages with sparse ## Connections and add [[links]] to related pages — add the backlink too.
-4. Rename or move pages with write_file + delete_file when a name is confusing.
-5. Reply with a plain-text summary of changes.
+3. Split any page that covers 3+ unrelated concepts into focused sub-pages — each should have one clear topic. Don't over-split: a page covering a single place or person with multiple details is fine. Only split when topics are genuinely distinct.
+4. Read pages with sparse ## Connections and add [[links]] to related pages — add the backlink too.
+5. Rename or move pages with write_file + delete_file when a name is confusing.
+6. Reply with a plain-text summary of changes.
 """
 
     static let defaultChatPersonality = """

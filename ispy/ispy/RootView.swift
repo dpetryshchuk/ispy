@@ -42,7 +42,6 @@ struct RootView: View {
                         let cursor = wikiStore.lastDreamed ?? .distantPast
                         return memoryStore.entries.filter { $0.timestamp > cursor }.count
                     }(),
-                    lastDreamed: wikiStore.lastDreamed,
                     devStageOverride: devStageOverride
                 )
                 .navigationTitle("ispy")

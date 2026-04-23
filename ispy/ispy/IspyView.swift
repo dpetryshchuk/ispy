@@ -4,17 +4,16 @@ import SwiftUI
 
 struct EvolutionStage {
     let minCaptures: Int
-    let label: String
 }
 
 private let stages: [EvolutionStage] = [
-    EvolutionStage(minCaptures: 0,    label: "point"),
-    EvolutionStage(minCaptures: 5,    label: "line"),
-    EvolutionStage(minCaptures: 25,   label: "triangle"),
-    EvolutionStage(minCaptures: 100,  label: "diamond"),
-    EvolutionStage(minCaptures: 250,  label: "pentagon"),
-    EvolutionStage(minCaptures: 500,  label: "hexagon"),
-    EvolutionStage(minCaptures: 1000, label: "star"),
+    EvolutionStage(minCaptures: 0),
+    EvolutionStage(minCaptures: 5),
+    EvolutionStage(minCaptures: 25),
+    EvolutionStage(minCaptures: 100),
+    EvolutionStage(minCaptures: 250),
+    EvolutionStage(minCaptures: 500),
+    EvolutionStage(minCaptures: 1000),
 ]
 
 func evolutionStageIndex(for captures: Int) -> Int {
@@ -32,29 +31,21 @@ struct IspyView: View {
     let wikiPageCount: Int
     let connectionCount: Int
     let isDreaming: Bool
-    let pendingCount: Int       // captures not yet dreamed
-    let lastDreamed: Date?
+    let pendingCount: Int
 
     var devStageOverride: Int? = nil
 
-    @State private var pulse = false
+    @State private var breathe = false
 
     private var stageIndex: Int {
         devStageOverride ?? evolutionStageIndex(for: captureCount)
     }
 
-    private var nextThreshold: Int {
-        let next = stageIndex + 1
-        guard next < stages.count else { return -1 }
-        return stages[next].minCaptures
-    }
-
-    // Pulse speed reflects "hunger" — more pending = faster
-    private var pulseSpeed: Double {
-        if isDreaming { return 0.9 }
-        if pendingCount > 20 { return 1.2 }
-        if pendingCount > 5  { return 1.8 }
-        return 2.8
+    private var breatheDuration: Double {
+        if isDreaming { return 0.7 }
+        if pendingCount > 10 { return 1.0 }
+        if pendingCount > 0  { return 1.6 }
+        return 2.5
     }
 
     var body: some View {
@@ -62,66 +53,33 @@ struct IspyView: View {
             Spacer()
 
             IspyShapeView(stageIndex: stageIndex, size: 160)
-                .scaleEffect(pulse ? 1.04 : 1.0)
-                .opacity(isDreaming ? (pulse ? 0.55 : 1.0) : 1.0)
-                .animation(
-                    (isDreaming || pendingCount > 0)
-                        ? .easeInOut(duration: pulseSpeed).repeatForever(autoreverses: true)
-                        : .spring(duration: 0.6),
-                    value: pulse
-                )
+                .scaleEffect(breathe ? 1.05 : 1.0)
+                .opacity(isDreaming && breathe ? 0.6 : 1.0)
                 .animation(.spring(duration: 0.6), value: stageIndex)
-                .onAppear { pulse = isDreaming || pendingCount > 0 }
-                .onChange(of: isDreaming) { _, _ in pulse = isDreaming || pendingCount > 0 }
-                .onChange(of: pendingCount) { _, _ in pulse = isDreaming || pendingCount > 0 }
-                .padding(.bottom, 14)
-
-            Text(isDreaming ? "dreaming…" : stages[stageIndex].label)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.secondary)
-
-            // Pending indicator — small dot row, not overlapping the shape
-            if pendingCount > 0 && !isDreaming && devStageOverride == nil {
-                HStack(spacing: 4) {
-                    ForEach(0..<min(pendingCount, 7), id: \.self) { _ in
-                        Circle().fill(Color.orange.opacity(0.7)).frame(width: 4, height: 4)
-                    }
-                    if pendingCount > 7 {
-                        Text("+\(pendingCount - 7)")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.orange.opacity(0.7))
-                    }
-                }
-                .padding(.top, 6)
-            } else if nextThreshold > 0 && devStageOverride == nil {
-                Text("\(nextThreshold - captureCount) until next form")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                    .padding(.top, 4)
-            } else {
-                Color.clear.frame(height: 16)
-            }
+                .onAppear { startBreathing() }
+                .onChange(of: isDreaming) { _, _ in startBreathing() }
+                .onChange(of: pendingCount) { _, _ in startBreathing() }
+                .onChange(of: stageIndex) { _, _ in startBreathing() }
 
             Spacer()
 
-            HStack(spacing: 40) {
-                StatCounter(label: "seen", value: captureCount)
-                StatCounter(label: "known", value: wikiPageCount)
-                StatCounter(label: "links", value: connectionCount)
+            HStack(spacing: 12) {
+                StatBox(label: "seen", value: captureCount)
+                StatBox(label: "known", value: wikiPageCount)
+                StatBox(label: "links", value: connectionCount)
             }
-            .padding(.bottom, 8)
-
-            if let date = lastDreamed {
-                Text("processed \(date, format: .relative(presentation: .named))")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.quaternary)
-                    .padding(.bottom, 32)
-            } else {
-                Color.clear.frame(height: 32)
-            }
+            .padding(.horizontal)
+            .padding(.bottom, 32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.horizontal)
+    }
+
+    private func startBreathing() {
+        breathe = false
+        let duration = breatheDuration
+        withAnimation(.easeInOut(duration: duration).repeatForever(autoreverses: true)) {
+            breathe = true
+        }
     }
 }
 
@@ -139,13 +97,14 @@ struct IspyShapeView: View {
 
             switch stageIndex {
             case 0:
+                // Point — small dot
                 let dot = Path(ellipseIn: CGRect(x: cx - 5, y: cy - 5, width: 10, height: 10))
                 ctx.fill(dot, with: .foreground)
 
             case 1:
-                let pts = linePoints(cx: cx, cy: cy, r: r)
-                drawEdges(ctx, pts, [(0,1)])
-                drawNodes(ctx, pts, r: 4)
+                // Line stage — slightly larger dot (no literal line)
+                let dot = Path(ellipseIn: CGRect(x: cx - 9, y: cy - 9, width: 18, height: 18))
+                ctx.fill(dot, with: .foreground)
 
             case 2:
                 let pts = polygonPoints(cx: cx, cy: cy, r: r, n: 3, rotation: -.pi / 2)
@@ -191,10 +150,6 @@ struct IspyShapeView: View {
     }
 
     // MARK: helpers
-
-    private func linePoints(cx: CGFloat, cy: CGFloat, r: CGFloat) -> [CGPoint] {
-        [CGPoint(x: cx - r, y: cy), CGPoint(x: cx + r, y: cy)]
-    }
 
     private func polygonPoints(cx: CGFloat, cy: CGFloat, r: CGFloat, n: Int, rotation: CGFloat) -> [CGPoint] {
         (0..<n).map { i in
@@ -244,20 +199,25 @@ struct IspyShapeView: View {
     }
 }
 
-// MARK: - Stat counter
+// MARK: - Stat box
 
-struct StatCounter: View {
+struct StatBox: View {
     let label: String
     let value: Int
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 6) {
             Text("\(value)")
-                .font(.system(size: 22, weight: .light, design: .rounded))
+                .font(.system(size: 26, weight: .semibold, design: .rounded))
                 .foregroundStyle(.primary)
+                .monospacedDigit()
             Text(label)
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 }

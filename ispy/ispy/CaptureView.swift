@@ -163,8 +163,8 @@ struct CaptureView: View {
             contextInputView
 
             if saved {
-                Button("Retake") { clearAll() }.buttonStyle(.bordered)
-                Text("Saved").foregroundStyle(.green).font(.caption)
+                Button("New Capture") { clearAll() }.buttonStyle(.borderedProminent)
+                Text("Saved to Salients").foregroundStyle(.green).font(.caption)
             } else {
                 HStack(spacing: 16) {
                     Button("Save") {

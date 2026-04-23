@@ -113,17 +113,20 @@ struct ForceGraph: View {
     var body: some View {
         GeometryReader { geo in
             let sz = geo.size
-            Canvas { ctx, _ in
-                // Draw edges
-                for edge in edges {
-                    guard let a = positions[edge.a], let b = positions[edge.b] else { continue }
-                    var path = Path()
-                    path.move(to: a); path.addLine(to: b)
-                    ctx.stroke(path, with: .color(.secondary.opacity(0.3)), lineWidth: 1)
+            ZStack {
+                // Edge layer — drawn behind nodes
+                Canvas { ctx, canvasSize in
+                    for edge in edges {
+                        guard let a = positions[edge.a], let b = positions[edge.b] else { continue }
+                        var path = Path()
+                        path.move(to: a)
+                        path.addLine(to: b)
+                        ctx.stroke(path, with: .color(.secondary.opacity(0.6)), lineWidth: 1.5)
+                    }
                 }
-            }
-            .overlay {
-                // Draw nodes on top (need gesture + tap)
+                .frame(width: sz.width, height: sz.height)
+
+                // Node layer — needs gestures
                 ForEach(pages) { page in
                     if let pos = positions[page.id] {
                         GraphNodeView(title: page.title, folder: page.folder, linkCount: page.links.count)
@@ -196,7 +199,6 @@ struct ForceGraph: View {
         let damping: CGFloat = 0.78
         let gravity: CGFloat = 0.012
 
-        // Repulsion between all pairs
         for i in 0..<pages.count {
             for j in (i+1)..<pages.count {
                 let a = pages[i].id, b = pages[j].id
@@ -210,7 +212,6 @@ struct ForceGraph: View {
             }
         }
 
-        // Spring along edges
         for edge in edges {
             guard let pa = p[edge.a], let pb = p[edge.b] else { continue }
             let dx = pb.x - pa.x, dy = pb.y - pa.y
@@ -221,7 +222,6 @@ struct ForceGraph: View {
             forces[edge.b]!.x -= nx; forces[edge.b]!.y -= ny
         }
 
-        // Integrate + gravity to center
         var maxSpeed: CGFloat = 0
         for page in pages {
             let id = page.id
@@ -243,7 +243,7 @@ struct ForceGraph: View {
                 y: max(60, min(size.height - 60, pt.y)))
     }
 
-    // MARK: - Edge resolution: path match first, then title fuzzy
+    // MARK: - Edge resolution: full path, filename-only, then title
 
     struct GraphEdge: Identifiable {
         let id: String; let a: String; let b: String
@@ -252,21 +252,25 @@ struct ForceGraph: View {
     private var edges: [GraphEdge] {
         var result: [GraphEdge] = []
         var seen = Set<String>()
-        // Build lookup by both path and title (normalized)
-        var byPath: [String: String] = [:]   // normalizedPath → pageID
-        var byTitle: [String: String] = [:]  // normalizedTitle → pageID
+        var byPath: [String: String] = [:]
+        var byTitle: [String: String] = [:]
         for page in pages {
-            byPath[page.id.lowercased()] = page.id
+            let idLower = page.id.lowercased()
+            byPath[idLower] = page.id
             byPath[page.path.lowercased()] = page.id
+            // Also index by filename alone (without folder) so [[pagename]] works
+            let filename = URL(fileURLWithPath: idLower).lastPathComponent
+            let filenameStem = filename.hasSuffix(".md") ? String(filename.dropLast(3)) : filename
+            byPath[filename] = page.id
+            byPath[filenameStem] = page.id
             byTitle[page.title.lowercased()] = page.id
         }
 
         for page in pages {
             for link in page.links {
-                let clean = link.trimmingCharacters(in: .whitespaces)
-                // Try path match first (with and without .md)
-                let withMd = clean.hasSuffix(".md") ? clean.lowercased() : (clean + ".md").lowercased()
-                let withoutMd = clean.hasSuffix(".md") ? String(clean.dropLast(3)).lowercased() : clean.lowercased()
+                let clean = link.trimmingCharacters(in: .whitespaces).lowercased()
+                let withMd = clean.hasSuffix(".md") ? clean : clean + ".md"
+                let withoutMd = clean.hasSuffix(".md") ? String(clean.dropLast(3)) : clean
                 let targetId = byPath[withMd] ?? byPath[withoutMd] ?? byTitle[withoutMd]
                 guard let tid = targetId, tid != page.id else { continue }
                 let key = [page.id, tid].sorted().joined(separator: "—")
@@ -287,9 +291,9 @@ struct GraphNodeView: View {
     var body: some View {
         VStack(spacing: 2) {
             Circle()
-                .fill(folderColor(folder).opacity(0.8))
+                .fill(folderColor(folder).opacity(0.85))
                 .frame(width: size, height: size)
-                .shadow(color: folderColor(folder).opacity(0.3), radius: 4)
+                .shadow(color: folderColor(folder).opacity(0.4), radius: 4)
             Text(title)
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
@@ -297,7 +301,58 @@ struct GraphNodeView: View {
         }
     }
 
-    private var size: CGFloat { CGFloat(12 + min(linkCount, 8) * 3) }
+    private var size: CGFloat { CGFloat(14 + min(linkCount, 8) * 3) }
+}
+
+// MARK: - Markdown renderer
+
+struct MarkdownContentView: View {
+    let text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                lineView(line)
+            }
+        }
+    }
+
+    private var lines: [String] {
+        text.components(separatedBy: .newlines)
+    }
+
+    @ViewBuilder
+    private func lineView(_ line: String) -> some View {
+        if line.hasPrefix("### ") {
+            Text(String(line.dropFirst(4)))
+                .font(.subheadline).fontWeight(.semibold)
+                .padding(.top, 6)
+        } else if line.hasPrefix("## ") {
+            Text(String(line.dropFirst(3)))
+                .font(.headline)
+                .padding(.top, 8)
+        } else if line.hasPrefix("# ") {
+            Text(String(line.dropFirst(2)))
+                .font(.title3).bold()
+                .padding(.top, 8)
+        } else if line.hasPrefix("- ") || line.hasPrefix("* ") {
+            HStack(alignment: .top, spacing: 6) {
+                Text("•").foregroundStyle(.secondary)
+                inlineText(String(line.dropFirst(2)))
+            }
+        } else if line.isEmpty {
+            Spacer().frame(height: 2)
+        } else {
+            inlineText(line)
+        }
+    }
+
+    private func inlineText(_ s: String) -> some View {
+        let attributed = (try? AttributedString(markdown: s,
+            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(s)
+        return Text(attributed).fixedSize(horizontal: false, vertical: true)
+    }
 }
 
 // MARK: - Page Detail
@@ -321,7 +376,9 @@ struct WikiPageView: View {
                             .foregroundStyle(folderColor(page.folder))
                     }
                     Text(page.title).font(.title2).bold()
-                    Text(displayContent).foregroundStyle(.primary)
+
+                    MarkdownContentView(text: displayContent)
+
                     if !page.links.isEmpty {
                         Divider()
                         Text("Connections").font(.caption).foregroundStyle(.secondary)
@@ -335,7 +392,6 @@ struct WikiPageView: View {
                     }
                     if !memoryLinks.isEmpty {
                         Divider()
-                        Text("Sources").font(.caption).foregroundStyle(.secondary)
                         ForEach(memoryLinks, id: \.self) { uuidStr in
                             if let entry = findMemory(uuidStr) {
                                 Button { selectedMemory = entry } label: {
@@ -368,6 +424,7 @@ struct WikiPageView: View {
 
     private var displayContent: String {
         rawContent.replacingOccurrences(of: #"\[\[memory:[^\]]+\]\]"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\[\[([^\]]+)\]\]"#, with: "$1", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -386,7 +443,12 @@ struct WikiPageView: View {
 
     private func findPage(_ name: String) -> WikiPage? {
         let clean = name.trimmingCharacters(in: .whitespaces)
+        let pages = wikiStore.allPages()
+        // Full path match first
         let linkId = clean.hasSuffix(".md") ? clean : clean + ".md"
-        return wikiStore.allPages().first { $0.id.lowercased() == linkId.lowercased() }
+        if let match = pages.first(where: { $0.id.lowercased() == linkId.lowercased() }) { return match }
+        // Filename-only match
+        let filename = URL(fileURLWithPath: linkId).lastPathComponent.lowercased()
+        return pages.first(where: { URL(fileURLWithPath: $0.id).lastPathComponent.lowercased() == filename })
     }
 }

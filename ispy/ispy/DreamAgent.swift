@@ -33,24 +33,10 @@ struct DreamAgent {
     // MARK: - Memory loop
 
     private func processCapture(_ capture: MemoryEntry, entropyPages: [String], memoryStore: MemoryStore) async throws {
-        // Vision pass — look at the actual photo
-        var visionContext = ""
-        let photoURL = memoryStore.photoURL(for: capture)
-        if let imageData = try? Data(contentsOf: photoURL) {
-            await log.append("→ vision()")
-            if let fresh = try? await engine.vision(
-                imageData: imageData,
-                prompt: promptConfig.visionDreamPrompt,
-                maxTokens: 256
-            ) {
-                visionContext = fresh
-            }
-        }
-
         try await engine.openSession(temperature: 0.3, maxTokens: 1024)
         defer { engine.closeSession() }
 
-        let systemBlock = buildMemorySystemPrompt(entropyPages: entropyPages, visionContext: visionContext)
+        let systemBlock = buildMemorySystemPrompt(entropyPages: entropyPages, visionContext: "")
         let extraInstructions = promptConfig.memoryExtraInstructions
             .replacingOccurrences(of: "{MEMORY_ID}", with: capture.id.uuidString)
 
@@ -61,8 +47,7 @@ struct DreamAgent {
             "--- MEMORY ---\n" +
             "ID: \(capture.id.uuidString)\n" +
             "Captured: \(capture.timestamp.formatted(.iso8601))\n" +
-            "What Gemma saw when this was captured:\n\(capture.description)\n" +
-            (visionContext.isEmpty ? "" : "\nWhat I see now looking back at the photo:\n\(visionContext)\n") +
+            "Visual analysis:\n\(capture.description)\n" +
             "<turn|>\n<|turn>model\n"
 
         var response = try await runTurn(firstInput, recordingInput: firstInput)

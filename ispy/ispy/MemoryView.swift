@@ -43,17 +43,22 @@ struct MemoryView: View {
         List {
             ForEach(Array(memoryStore.entries.reversed())) { entry in
                 Button { selectedEntry = entry } label: {
-                    HStack(spacing: 10) {
-                        let processed = lastDreamed.map { entry.timestamp <= $0 } ?? false
-                        Circle()
-                            .fill(processed ? Color.purple.opacity(0.7) : Color.secondary.opacity(0.2))
-                            .frame(width: 7, height: 7)
+                    HStack(spacing: 12) {
+                        ThumbnailView(url: memoryStore.photoURL(for: entry))
+
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(entry.timestamp, format: .dateTime.day().month().hour().minute())
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            let processed = lastDreamed.map { entry.timestamp <= $0 } ?? false
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(processed ? Color.purple.opacity(0.7) : Color.secondary.opacity(0.2))
+                                    .frame(width: 6, height: 6)
+                                Text(entry.timestamp, format: .dateTime.day().month().hour().minute())
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                             Text(entry.description.components(separatedBy: .newlines).first ?? "")
                                 .lineLimit(2)
+                                .font(.subheadline)
                         }
                     }
                 }
@@ -65,6 +70,35 @@ struct MemoryView: View {
             }
         }
         .listStyle(.plain)
+    }
+}
+
+// MARK: - Async thumbnail loader
+
+struct ThumbnailView: View {
+    let url: URL
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let img = image {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Color(.tertiarySystemBackground)
+                    .overlay { Image(systemName: "photo").foregroundStyle(.quaternary) }
+            }
+        }
+        .frame(width: 52, height: 52)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .task(id: url) {
+            let path = url.path
+            let loaded = await Task.detached(priority: .userInitiated) {
+                UIImage(contentsOfFile: path)
+            }.value
+            image = loaded
+        }
     }
 }
 
