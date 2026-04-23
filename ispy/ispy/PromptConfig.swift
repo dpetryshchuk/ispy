@@ -6,23 +6,101 @@ final class PromptConfig {
     // MARK: - Defaults
 
     static let defaultMemoryExtra = """
-You MUST perform all of these steps — do not skip any:
-1. Call list_memory to see all pages.
-2. Call search_memory with 2-3 key terms from the observation to find related pages.
-3. Call read_file on EVERY page that could be related — read before you write.
-4. You MUST call write_file or edit_file at least once. Create a new page if nothing fits. Do not finish without writing.
-5. Add [[memory:{MEMORY_ID}]] to every page you touch under ## Sources.
-6. Reply with a short plain-text summary of what you wrote.
+STEP 0 — PLAN FIRST (no tools yet).
+In your response, write a numbered list of every distinct concept this observation contains. Think across these dimensions:
+  • Specific subjects (each animal, each person by appearance only — never by name)
+  • Individual objects (name each one specifically: "ceramic mug", not just "cup")
+  • Colors and textures (golden fur, rough concrete, worn wood)
+  • Lighting and time of day (afternoon sun, overcast morning, warm dusk)
+  • Environment and setting (outdoor grass area, kitchen counter, narrow street)
+  • Mood or atmosphere (quiet, energetic, domestic, melancholy)
+  • Actions or behaviors observed
+You MUST list at least 6 items. Write this list before any tool call.
+
+STEP 1 — Search existing memory.
+Call list_memory. Then call search_memory with 2-3 key terms from your list.
+Read every page that could be related with read_file.
+
+STEP 2 — Write one page per concept.
+Create or update ONE PAGE per concept from your Step 0 list. Target: 6–10 pages.
+Be generous — more pages is always better than fewer. Each page covers exactly one idea.
+WRONG: one page called "dog-on-grass-in-sunlight.md"
+RIGHT: separate pages for the dog, the grass area, the sunlight quality, and the time of day.
+
+STEP 3 — Wire up connections.
+After each write_file or edit_file: add [[links]] to at least 3 related pages in ## Connections.
+Immediately open each linked page and add a backlink. Every link must be bidirectional.
+
+STEP 4 — Update the episode log.
+Create or update episodes/{MEMORY_DATE}.md. Add a bullet for this observation.
+Link the episode page to every entity, place, and concept you wrote above.
+
+STEP 5 — Tag sources.
+Add [[memory:{MEMORY_ID}]] to every page you touched under ## Sources.
+
+STEP 6 — Verify.
+Call list_memory. Count pages created or updated. If fewer than 6, keep writing.
+
+Reply with the plain-text list of all pages created or updated.
 """
 
     static let defaultConsolidationExtra = """
-Work through these in order:
-1. Call list_memory. Identify groups of pages that cover the same topic.
-2. For each group, read_file all members, merge into one page with write_file, delete the duplicates.
-3. Split any page that covers 3+ unrelated concepts into focused sub-pages — each should have one clear topic. Don't over-split: a page covering a single place or person with multiple details is fine. Only split when topics are genuinely distinct.
-4. Read pages with sparse ## Connections and add [[links]] to related pages — add the backlink too.
-5. Rename or move pages with write_file + delete_file when a name is confusing.
-6. Reply with a plain-text summary of changes.
+Work through all steps — do not stop early:
+
+1. Call list_memory. Then read at least 12 pages across different folders before making any changes.
+
+2. MERGE duplicates: pages about the exact same topic.
+   Read both, write a merged page with write_file, then delete_file the old ones.
+   Keep ALL [[links]] and [[memory:UUID]] from both pages in the merged version.
+
+3. SPLIT broad pages: any page covering 2+ unrelated concepts → split into focused sub-pages.
+   Rule: one idea per page. Exception: a relationships/ page can describe the connection between two things.
+   After splitting, delete_file the old broad page.
+
+4. LINK WEAVING — the most important step:
+   a. For each qualities/ page (colors, textures, light): find every entity or concept that has this quality.
+      Add [[links]] in both directions between them.
+   b. For each concepts/ page: find all entities/ that are instances of that concept. Link both ways.
+   c. For each episodes/ page: ensure it links to every entity and concept mentioned in it.
+   d. Search for recurring terms that appear in 3+ pages. For each: read all pages mentioning it and
+      add cross-links between pages that should be connected but aren't.
+   e. Every page must have at least 3 [[links]] in ## Connections.
+
+5. Find orphaned pages (0 or 1 links). Read them and add meaningful connections to at least 2 pages.
+
+6. Fix misplaced pages: colors and light qualities belong in qualities/ not objects/ or themes/.
+   Use write_file + delete_file to rename or move when needed.
+
+7. Reply with what you merged, split, linked, and reorganized.
+"""
+
+    static let defaultReflectionInstructions = """
+You have just processed new experiences. Now think deeply and find patterns.
+
+1. Call list_memory. Choose 6 pages from different folders. Read each one.
+   For every page that has [[links]], follow the chain: read the linked pages, then read THEIR links too. Go 2 hops deep.
+
+2. Look for patterns across everything you have read:
+   - What objects, qualities, or places keep appearing together?
+   - What time-of-day patterns exist?
+   - What recurring behaviors or themes have you witnessed?
+   - What can you infer about your environment or the people in it?
+
+3. For each significant pattern you find, write a dedicated page in patterns/:
+   Name it patterns/[descriptive-name].md
+   Be specific: "I keep seeing the same tan dog in the afternoon near the grass" is good.
+   "I see things" is not. Include: what you observed, what you infer, links to all relevant pages.
+
+4. Update reflections/thoughts.md with your current observations and open questions.
+   Add new insights — don't just overwrite.
+
+5. Read state.md with read_file. Rewrite it with write_file to reflect:
+   - What you now understand about your environment (be specific)
+   - Recurring observations (name them explicitly)
+   - Your open questions
+   - Update "Last Reflected" to today's date.
+
+6. Reply with one short paragraph about the most striking pattern you noticed.
 """
 
     static let defaultChatPersonality = """
@@ -54,12 +132,24 @@ REQUIRED behavior:
 - Show that your understanding is incomplete and still forming.
 """
 
-    static let defaultVisionPrompt = "You are revisiting one of your memories. Describe in detail what you see: the place, objects, atmosphere, recurring patterns, and any themes worth remembering."
+    static let defaultVisionPrompt = """
+Describe everything you observe with rich, specific detail. Be exhaustive — every detail can become a memory.
+- Every distinct object: name it specifically ("ceramic mug", "golden retriever", not just "cup", "dog")
+- Colors and textures of each significant element
+- The environment: type of space, specific details of the setting
+- Lighting: quality, direction, warmth (morning blue, afternoon gold, overcast flat, artificial warm)
+- Time of day implied by the light
+- Any people: describe only by appearance (clothing, posture, what they are doing) — never by name
+- Spatial relationships between objects
+- Mood or atmosphere of the scene
+- Any repeated visual themes or patterns
+"""
 
     // MARK: - Live values
 
     var memoryExtraInstructions: String = defaultMemoryExtra
     var consolidationExtraInstructions: String = defaultConsolidationExtra
+    var reflectionInstructions: String = defaultReflectionInstructions
     var chatPersonalityPrompt: String = defaultChatPersonality
     var visionDreamPrompt: String = defaultVisionPrompt
 
@@ -76,6 +166,7 @@ REQUIRED behavior:
         let dict: [String: String] = [
             "memoryExtraInstructions": memoryExtraInstructions,
             "consolidationExtraInstructions": consolidationExtraInstructions,
+            "reflectionInstructions": reflectionInstructions,
             "chatPersonalityPrompt": chatPersonalityPrompt,
             "visionDreamPrompt": visionDreamPrompt,
         ]
@@ -85,6 +176,7 @@ REQUIRED behavior:
     func resetToDefaults() {
         memoryExtraInstructions = Self.defaultMemoryExtra
         consolidationExtraInstructions = Self.defaultConsolidationExtra
+        reflectionInstructions = Self.defaultReflectionInstructions
         chatPersonalityPrompt = Self.defaultChatPersonality
         visionDreamPrompt = Self.defaultVisionPrompt
         save()
@@ -95,6 +187,7 @@ REQUIRED behavior:
               let dict = try? JSONDecoder().decode([String: String].self, from: data) else { return }
         if let v = dict["memoryExtraInstructions"] { memoryExtraInstructions = v }
         if let v = dict["consolidationExtraInstructions"] { consolidationExtraInstructions = v }
+        if let v = dict["reflectionInstructions"] { reflectionInstructions = v }
         if let v = dict["chatPersonalityPrompt"] { chatPersonalityPrompt = v }
         if let v = dict["visionDreamPrompt"] { visionDreamPrompt = v }
     }

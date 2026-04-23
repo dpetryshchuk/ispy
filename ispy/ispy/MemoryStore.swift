@@ -18,8 +18,7 @@ enum MemoryError: Error {
 final class MemoryStore {
     private(set) var entries: [MemoryEntry] = []
 
-    let memoryDir: URL
-    let rawDir: URL
+    let experiencesDir: URL
 
     private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -30,9 +29,16 @@ final class MemoryStore {
 
     init() {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        memoryDir = docs.appendingPathComponent("memory")
-        rawDir = memoryDir.appendingPathComponent("raw")
-        try? FileManager.default.createDirectory(at: rawDir, withIntermediateDirectories: true)
+        experiencesDir = docs.appendingPathComponent("experiences")
+
+        // Migrate memory/raw/ → experiences/ on first run after rename
+        let oldRaw = docs.appendingPathComponent("memory").appendingPathComponent("raw")
+        if FileManager.default.fileExists(atPath: oldRaw.path),
+           !FileManager.default.fileExists(atPath: experiencesDir.path) {
+            try? FileManager.default.moveItem(at: oldRaw, to: experiencesDir)
+        }
+
+        try? FileManager.default.createDirectory(at: experiencesDir, withIntermediateDirectories: true)
         migrateFromLegacyIfNeeded()
         entries = allEntries()
     }
@@ -104,7 +110,7 @@ final class MemoryStore {
     // MARK: - Helpers used by WikiStore / DreamAgent
 
     func dayDirectory(for date: Date) -> URL {
-        rawDir.appendingPathComponent(Self.dayFormatter.string(from: date))
+        experiencesDir.appendingPathComponent(Self.dayFormatter.string(from: date))
     }
 
     func capturesURL(dayDir: URL) -> URL {
@@ -113,7 +119,7 @@ final class MemoryStore {
 
     func allDayDirectories() -> [URL] {
         ((try? FileManager.default.contentsOfDirectory(
-            at: rawDir, includingPropertiesForKeys: [.isDirectoryKey]
+            at: experiencesDir, includingPropertiesForKeys: [.isDirectoryKey]
         )) ?? [])
         .filter { url in
             (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
@@ -144,8 +150,11 @@ final class MemoryStore {
     }
 
     private func migrateFromLegacyIfNeeded() {
-        let legacyIndex = memoryDir.appendingPathComponent("index.json")
-        let legacyPhotos = memoryDir.appendingPathComponent("photos")
+        // Legacy: single index.json + photos/ flat structure inside memory/
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let legacyDir = docs.appendingPathComponent("memory")
+        let legacyIndex = legacyDir.appendingPathComponent("index.json")
+        let legacyPhotos = legacyDir.appendingPathComponent("photos")
         guard FileManager.default.fileExists(atPath: legacyIndex.path),
               let data = try? Data(contentsOf: legacyIndex),
               let oldEntries = try? JSONDecoder().decode([MemoryEntry].self, from: data) else { return }

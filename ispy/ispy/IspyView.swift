@@ -8,13 +8,15 @@ struct EvolutionStage {
 
 private let stages: [EvolutionStage] = [
     EvolutionStage(minCaptures: 0),
-    EvolutionStage(minCaptures: 5),
+    EvolutionStage(minCaptures: 10),
     EvolutionStage(minCaptures: 25),
     EvolutionStage(minCaptures: 100),
     EvolutionStage(minCaptures: 250),
     EvolutionStage(minCaptures: 500),
     EvolutionStage(minCaptures: 1000),
 ]
+
+private let stageNames = ["dot", "line", "triangle", "diamond", "pentagon", "hexagon", "star"]
 
 func evolutionStageIndex(for captures: Int) -> Int {
     var idx = 0
@@ -63,8 +65,15 @@ struct IspyView: View {
 
             Spacer()
 
+            if let prog = progressText {
+                Text(prog)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .padding(.bottom, 10)
+            }
+
             HStack(spacing: 12) {
-                StatBox(label: "seen", value: captureCount)
+                StatBox(label: "experiences", value: captureCount)
                 StatBox(label: "known", value: wikiPageCount)
                 StatBox(label: "links", value: connectionCount)
             }
@@ -72,6 +81,14 @@ struct IspyView: View {
             .padding(.bottom, 32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var progressText: String? {
+        guard devStageOverride == nil else { return nil }
+        let nextIdx = stageIndex + 1
+        guard nextIdx < stages.count else { return nil }
+        let name = nextIdx < stageNames.count ? stageNames[nextIdx] : "next"
+        return "\(captureCount) / \(stages[nextIdx].minCaptures) to \(name)"
     }
 
     private func startBreathing() {
@@ -83,83 +100,118 @@ struct IspyView: View {
     }
 }
 
-// MARK: - Shape renderer
+// MARK: - Animated shape (TimelineView for per-vertex independent motion)
 
 struct IspyShapeView: View {
     let stageIndex: Int
     let size: CGFloat
+    var isAnalyzing: Bool = false
 
     var body: some View {
-        Canvas { ctx, sz in
-            let cx = sz.width / 2
-            let cy = sz.height / 2
-            let r = sz.width / 2 * 0.82
-
-            switch stageIndex {
-            case 0:
-                // Point — small dot
-                let dot = Path(ellipseIn: CGRect(x: cx - 5, y: cy - 5, width: 10, height: 10))
-                ctx.fill(dot, with: .foreground)
-
-            case 1:
-                // Line stage — slightly larger dot (no literal line)
-                let dot = Path(ellipseIn: CGRect(x: cx - 9, y: cy - 9, width: 18, height: 18))
-                ctx.fill(dot, with: .foreground)
-
-            case 2:
-                let pts = polygonPoints(cx: cx, cy: cy, r: r, n: 3, rotation: -.pi / 2)
-                drawEdges(ctx, pts, allEdges(n: 3))
-                drawNodes(ctx, pts, r: 4)
-
-            case 3:
-                let pts = polygonPoints(cx: cx, cy: cy, r: r, n: 4, rotation: -.pi / 2)
-                drawEdges(ctx, pts, allEdges(n: 4))
-                drawEdges(ctx, pts, [(0,2),(1,3)], dashed: true, alpha: 0.3)
-                drawNodes(ctx, pts, r: 4)
-
-            case 4:
-                let pts = polygonPoints(cx: cx, cy: cy, r: r, n: 5, rotation: -.pi / 2)
-                drawEdges(ctx, pts, allEdges(n: 5))
-                drawEdges(ctx, pts, [(0,2),(0,3),(1,3),(1,4),(2,4)], dashed: true, alpha: 0.25)
-                drawNodes(ctx, pts, r: 4)
-
-            case 5:
-                let pts = polygonPoints(cx: cx, cy: cy, r: r, n: 6, rotation: 0)
-                drawEdges(ctx, pts, allEdges(n: 6))
-                drawEdges(ctx, pts, allDiagonals(n: 6), dashed: true, alpha: 0.2)
-                drawNodes(ctx, pts, r: 4)
-
-            default:
-                let outer = polygonPoints(cx: cx, cy: cy, r: r, n: 6, rotation: -.pi / 6)
-                let inner = polygonPoints(cx: cx, cy: cy, r: r * 0.5, n: 6, rotation: 0)
-                var all: [CGPoint] = []
-                for i in 0..<6 { all.append(outer[i]); all.append(inner[i]) }
-                let rim: [(Int,Int)] = (0..<12).map { ($0, ($0+1) % 12) }
-                var withCenter = all
-                withCenter.append(CGPoint(x: cx, y: cy))
-                let spokes: [(Int,Int)] = (0..<6).map { ($0*2, 12) }
-                drawEdges(ctx, all, rim)
-                drawEdges(ctx, withCenter, spokes, alpha: 0.4)
-                drawEdges(ctx, all, allDiagonals(n: 12), dashed: true, alpha: 0.15)
-                drawNodes(ctx, outer, r: 4)
-                drawNodes(ctx, inner, r: 2.5)
+        TimelineView(.animation(minimumInterval: 1.0/30.0)) { tl in
+            let rawT = tl.date.timeIntervalSinceReferenceDate
+            let t = isAnalyzing ? rawT * 3.5 : rawT  // fast when analyzing
+            Canvas { ctx, sz in
+                let cx = sz.width / 2
+                let cy = sz.height / 2
+                let r = sz.width / 2 * 0.82
+                drawStage(ctx: ctx, cx: cx, cy: cy, r: r, t: t)
             }
         }
         .frame(width: size, height: size)
         .foregroundStyle(Color.primary)
     }
 
-    // MARK: helpers
+    private func drawStage(ctx: GraphicsContext, cx: CGFloat, cy: CGFloat, r: CGFloat, t: Double) {
+        switch stageIndex {
+        case 0:
+            // Dot: pulses in size
+            let s = CGFloat(6 + 4 * sin(t * 1.3))
+            ctx.fill(Path(ellipseIn: CGRect(x: cx - s, y: cy - s, width: s*2, height: s*2)), with: .foreground)
+
+        case 1:
+            // Line: each endpoint oscillates its distance from center independently
+            let r1 = r * CGFloat(0.55 + 0.45 * sin(t * 0.9))
+            let r2 = r * CGFloat(0.55 + 0.45 * sin(t * 1.1 + 1.4))
+            let ptA = CGPoint(x: cx - r1, y: cy)
+            let ptB = CGPoint(x: cx + r2, y: cy)
+            var path = Path()
+            path.move(to: ptA); path.addLine(to: ptB)
+            ctx.stroke(path, with: .foreground, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            for pt in [ptA, ptB] {
+                ctx.fill(Path(ellipseIn: CGRect(x: pt.x-4, y: pt.y-4, width: 8, height: 8)), with: .foreground)
+            }
+
+        case 2:
+            // Triangle: each vertex oscillates its radius independently
+            let rs = [
+                r * CGFloat(0.72 + 0.28 * sin(t * 0.8)),
+                r * CGFloat(0.72 + 0.28 * sin(t * 1.1 + 2.1)),
+                r * CGFloat(0.72 + 0.28 * sin(t * 0.95 + 4.2)),
+            ]
+            let pts = (0..<3).map { i -> CGPoint in
+                let angle = -.pi/2 + 2 * .pi * CGFloat(i) / 3
+                return CGPoint(x: cx + rs[i] * cos(angle), y: cy + rs[i] * sin(angle))
+            }
+            drawEdges(ctx, pts, [(0,1),(1,2),(2,0)])
+            drawNodes(ctx, pts, r: 4)
+
+        case 3:
+            let rs: [CGFloat] = (0..<4).map { i in
+                let s = sin(t * (0.7 + Double(i) * 0.15) + Double(i) * 1.5)
+                return r * CGFloat(0.78 + 0.22 * s)
+            }
+            let pts = (0..<4).map { i -> CGPoint in
+                let angle = -.pi/2 + 2 * .pi * CGFloat(i) / 4
+                return CGPoint(x: cx + rs[i] * cos(angle), y: cy + rs[i] * sin(angle))
+            }
+            drawEdges(ctx, pts, [(0,1),(1,2),(2,3),(3,0)])
+            drawEdges(ctx, pts, [(0,2),(1,3)], dashed: true, alpha: 0.3)
+            drawNodes(ctx, pts, r: 4)
+
+        case 4:
+            let rs: [CGFloat] = (0..<5).map { i in
+                let s = sin(t * (0.7 + Double(i) * 0.12) + Double(i) * 1.3)
+                return r * CGFloat(0.78 + 0.22 * s)
+            }
+            let pts = (0..<5).map { i -> CGPoint in
+                let angle = -.pi/2 + 2 * .pi * CGFloat(i) / 5
+                return CGPoint(x: cx + rs[i] * cos(angle), y: cy + rs[i] * sin(angle))
+            }
+            drawEdges(ctx, pts, [(0,1),(1,2),(2,3),(3,4),(4,0)])
+            drawEdges(ctx, pts, [(0,2),(0,3),(1,3),(1,4),(2,4)], dashed: true, alpha: 0.25)
+            drawNodes(ctx, pts, r: 4)
+
+        case 5:
+            let pts = polygonPoints(cx: cx, cy: cy, r: r, n: 6, rotation: 0)
+            drawEdges(ctx, pts, [(0,1),(1,2),(2,3),(3,4),(4,5),(5,0)])
+            drawEdges(ctx, pts, allDiagonals(n: 6), dashed: true, alpha: 0.2)
+            drawNodes(ctx, pts, r: 4)
+
+        default:
+            let outer = polygonPoints(cx: cx, cy: cy, r: r, n: 6, rotation: -.pi / 6)
+            let inner = polygonPoints(cx: cx, cy: cy, r: r * 0.5, n: 6, rotation: 0)
+            var all: [CGPoint] = []
+            for i in 0..<6 { all.append(outer[i]); all.append(inner[i]) }
+            let rim: [(Int,Int)] = (0..<12).map { ($0, ($0+1) % 12) }
+            var withCenter = all
+            withCenter.append(CGPoint(x: cx, y: cy))
+            let spokes: [(Int,Int)] = (0..<6).map { ($0*2, 12) }
+            drawEdges(ctx, all, rim)
+            drawEdges(ctx, withCenter, spokes, alpha: 0.4)
+            drawEdges(ctx, all, allDiagonals(n: 12), dashed: true, alpha: 0.15)
+            drawNodes(ctx, outer, r: 4)
+            drawNodes(ctx, inner, r: 2.5)
+        }
+    }
+
+    // MARK: - Helpers
 
     private func polygonPoints(cx: CGFloat, cy: CGFloat, r: CGFloat, n: Int, rotation: CGFloat) -> [CGPoint] {
         (0..<n).map { i in
             let angle = rotation + 2 * .pi * CGFloat(i) / CGFloat(n)
             return CGPoint(x: cx + r * cos(angle), y: cy + r * sin(angle))
         }
-    }
-
-    private func allEdges(n: Int) -> [(Int,Int)] {
-        (0..<n).map { ($0, ($0+1) % n) }
     }
 
     private func allDiagonals(n: Int) -> [(Int,Int)] {
@@ -177,24 +229,19 @@ struct IspyShapeView: View {
         for (a, b) in edges {
             guard a < pts.count, b < pts.count else { continue }
             var path = Path()
-            path.move(to: pts[a])
-            path.addLine(to: pts[b])
-            var c = ctx
-            c.opacity = alpha
+            path.move(to: pts[a]); path.addLine(to: pts[b])
+            var c = ctx; c.opacity = alpha
             if dashed {
-                c.stroke(path, with: .foreground,
-                         style: StrokeStyle(lineWidth: 1, dash: [3, 4]))
+                c.stroke(path, with: .foreground, style: StrokeStyle(lineWidth: 1, dash: [3, 4]))
             } else {
-                c.stroke(path, with: .foreground,
-                         style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                c.stroke(path, with: .foreground, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
             }
         }
     }
 
     private func drawNodes(_ ctx: GraphicsContext, _ pts: [CGPoint], r: CGFloat) {
         for pt in pts {
-            let rect = CGRect(x: pt.x - r, y: pt.y - r, width: r*2, height: r*2)
-            ctx.fill(Path(ellipseIn: rect), with: .foreground)
+            ctx.fill(Path(ellipseIn: CGRect(x: pt.x-r, y: pt.y-r, width: r*2, height: r*2)), with: .foreground)
         }
     }
 }

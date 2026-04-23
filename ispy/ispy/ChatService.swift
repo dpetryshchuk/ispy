@@ -112,6 +112,14 @@ final class ChatService {
         return dir
     }()
 
+    var chatNeedsDream: Bool {
+        UserDefaults.standard.bool(forKey: "chatNeedsDream")
+    }
+
+    func clearChatNeedsDream() {
+        UserDefaults.standard.set(false, forKey: "chatNeedsDream")
+    }
+
     private func saveSession() {
         let entries = messages.compactMap { msg -> ChatSession.Entry? in
             switch msg.role {
@@ -123,7 +131,10 @@ final class ChatService {
         guard !entries.isEmpty else { return }
         let session = ChatSession(id: UUID(), startedAt: Date(), entries: entries)
         let url = Self.sessionsDir.appendingPathComponent("\(session.id.uuidString).json")
-        if let data = try? JSONEncoder().encode(session) { try? data.write(to: url) }
+        if let data = try? JSONEncoder().encode(session) {
+            try? data.write(to: url)
+            UserDefaults.standard.set(true, forKey: "chatNeedsDream")
+        }
     }
 
     func savedSessions() -> [ChatSession] {
@@ -230,6 +241,9 @@ final class ChatService {
     private func buildSystemPrompt() -> String {
         var s = "<|turn>system\n"
         s += promptConfig.chatPersonalityPrompt + "\n\n"
+        let state = wikiStore.readState()
+        s += "--- YOUR CURRENT STATE ---\n\(state)\n\n"
+        s += "IMPORTANT: When you mention or recall a specific memory image, include [[memory:UUID]] in your response using the exact UUID from the memory. The UI will show the image inline.\n\n"
         s += toolDeclarations()
         s += "<turn|>\n"
         return s

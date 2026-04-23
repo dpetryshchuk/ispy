@@ -15,7 +15,7 @@ struct MemoryView: View {
                     listView
                 }
             }
-            .navigationTitle("Salients")
+            .navigationTitle("Experiences")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     if !memoryStore.entries.isEmpty {

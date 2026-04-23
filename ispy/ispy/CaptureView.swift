@@ -45,6 +45,8 @@ struct CaptureView: View {
                        let image = UIImage(data: data) {
                         selectedImage = image
                         reset()
+                        // Auto-analyze immediately if model is ready
+                        if gemmaService.state.isReady { analyze(image: image) }
                     }
                 }
             }
@@ -99,6 +101,7 @@ struct CaptureView: View {
                 camera.capturePhoto { image in
                     selectedImage = image
                     errorMessage = image == nil ? "Capture failed" : nil
+                    if let image, gemmaService.state.isReady { analyze(image: image) }
                 }
             } label: {
                 ZStack {
@@ -124,22 +127,29 @@ struct CaptureView: View {
                     .cornerRadius(10)
 
                 if isAnalyzing {
-                    ProgressView("Analyzing…")
+                    VStack(spacing: 16) {
+                        IspyShapeView(
+                            stageIndex: evolutionStageIndex(for: memoryStore.entries.count),
+                            size: 90,
+                            isAnalyzing: true
+                        )
+                        Text("Thinking…")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 } else if let desc = description {
                     resultSection(image: image, desc: desc)
                 } else {
-                    HStack(spacing: 16) {
+                    // Model not ready — show manual trigger option
+                    VStack(spacing: 8) {
                         Button("Analyze") { analyze(image: image) }
                             .buttonStyle(.borderedProminent)
                             .disabled(!gemmaService.state.isReady)
-                        Button("Retake") { clearAll() }
-                            .buttonStyle(.bordered)
-                    }
-                    if !gemmaService.state.isReady {
-                        Text("Go to Capture tab and load Gemma 4 first")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
+                        Button("Retake") { clearAll() }.buttonStyle(.bordered)
+                        if !gemmaService.state.isReady {
+                            Text("Load Gemma 4 in the Capture tab first")
+                                .font(.caption).foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
                     }
                 }
 

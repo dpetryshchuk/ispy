@@ -10,6 +10,7 @@ struct MindView: View {
 
     @State private var selectedPage: WikiPage?
     @State private var showGraph = false
+    @State private var showKnowledgeMap = false
 
     var body: some View {
         NavigationStack {
@@ -26,7 +27,9 @@ struct MindView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     NavigationLink {
-                        ChatView(chatService: chatService, gemmaService: gemmaService)
+                        ChatView(chatService: chatService, gemmaService: gemmaService,
+                                 memoryStore: memoryStore, wikiStore: wikiStore,
+                                 dreamService: dreamService)
                     } label: {
                         Image(systemName: "bubble.left.and.bubble.right")
                     }
@@ -55,6 +58,9 @@ struct MindView: View {
                 WikiPageView(page: page, wikiStore: wikiStore, memoryStore: memoryStore) {
                     selectedPage = $0
                 }
+            }
+            .sheet(isPresented: $showKnowledgeMap) {
+                KnowledgeMapView(wikiStore: wikiStore)
             }
         }
     }
@@ -122,6 +128,24 @@ struct MindView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 60)
             } else {
+                // Pinned knowledge map entry
+                Button { showKnowledgeMap = true } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "map.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.blue.opacity(0.8))
+                        Text("Knowledge Map")
+                            .foregroundStyle(.primary)
+                            .font(.subheadline)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption2).foregroundStyle(.quaternary)
+                    }
+                    .padding(.vertical, 9)
+                    .padding(.horizontal)
+                }
+                Divider().padding(.leading)
+
                 ForEach(folders, id: \.self) { folder in
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(spacing: 6) {
@@ -310,5 +334,28 @@ struct DreamHistoryView: View {
         }
         .navigationTitle("Dream History")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+// MARK: - Knowledge Map
+
+struct KnowledgeMapView: View {
+    let wikiStore: WikiStore
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                MarkdownContentView(text: wikiStore.listWiki())
+                    .padding()
+            }
+            .navigationTitle("Knowledge Map")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
     }
 }

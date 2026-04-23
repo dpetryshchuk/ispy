@@ -63,9 +63,9 @@ struct RootView: View {
                 .tabItem { Label("Capture", systemImage: "camera.fill") }
                 .tag(1)
 
-            // MARK: Salients (raw captures)
+            // MARK: Experiences (raw captures)
             MemoryView(memoryStore: memoryStore, lastDreamed: wikiStore.lastDreamed)
-                .tabItem { Label("Salients", systemImage: "photo.stack") }
+                .tabItem { Label("Experiences", systemImage: "photo.stack") }
                 .tag(2)
 
             // MARK: Memory (knowledge base + dream + chat)

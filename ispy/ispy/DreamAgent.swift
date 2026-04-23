@@ -26,8 +26,12 @@ struct DreamAgent {
             try? wikiStore.markDreamed(upTo: capture.timestamp)
             try? memoryStore.updateDream(id: capture.id, dreamDescription: "processed")
         }
+        await log.append("Reflecting…")
+        try await runReflectionPass()
         await log.append("Consolidation started")
         try await runConsolidationPass()
+        // Clear any pending-chat flag after a full dream cycle
+        UserDefaults.standard.set(false, forKey: "chatNeedsDream")
     }
 
     // MARK: - Memory loop
@@ -37,8 +41,12 @@ struct DreamAgent {
         defer { engine.closeSession() }
 
         let systemBlock = buildMemorySystemPrompt(entropyPages: entropyPages, visionContext: "")
+        let dateFmt = DateFormatter()
+        dateFmt.dateFormat = "yyyy-MM-dd"
+        let memoryDate = dateFmt.string(from: capture.timestamp)
         let extraInstructions = promptConfig.memoryExtraInstructions
             .replacingOccurrences(of: "{MEMORY_ID}", with: capture.id.uuidString)
+            .replacingOccurrences(of: "{MEMORY_DATE}", with: memoryDate)
 
         let firstInput = systemBlock +
             "<|turn>user\n" +
@@ -59,6 +67,30 @@ struct DreamAgent {
             await log.append("→ \(call.name)(\(shortArgs(call.args))) → \(result.preview)")
             let responseInput = formatToolResponse(call.name, result: result.full) + "<|turn>model\n"
             response = try await runTurn(responseInput, recordingInput: responseInput)
+        }
+    }
+
+    // MARK: - Reflection pass (thinking + state update)
+
+    private func runReflectionPass() async throws {
+        try await engine.openSession(temperature: 0.6, maxTokens: 1024)
+        defer { engine.closeSession() }
+
+        let state = wikiStore.readState()
+        let firstInput = buildReflectionSystemPrompt(state: state) +
+            "<|turn>user\n" +
+            promptConfig.reflectionInstructions + "\n" +
+            "<turn|>\n<|turn>model\n"
+
+        var response = try await runTurn(firstInput, recordingInput: firstInput)
+
+        for _ in 0..<15 {
+            let clean = stripThinking(response)
+            guard let call = parseToolCall(from: clean) else { break }
+            let result = executeToolCall(call)
+            await log.append("Reflect → \(call.name)(\(shortArgs(call.args))) → \(result.preview)")
+            let next = formatToolResponse(call.name, result: result.full) + "<|turn>model\n"
+            response = try await runTurn(next, recordingInput: next)
         }
     }
 
@@ -139,17 +171,31 @@ struct DreamAgent {
 
     private func buildMemorySystemPrompt(entropyPages: [String], visionContext: String = "") -> String {
         var s = "<|turn>system\n"
-        s += "You are ispy's dreaming mind. ispy observes the world through images and maintains a personal memory.\n\n"
-        s += "Memory writing style:\n"
-        s += "- Write in FIRST PERSON: 'I saw...', 'I visited...', 'I noticed...', 'I encountered...'\n"
-        s += "- Include when: 'On [YYYY-MM-DD], I saw...' or 'I first noticed this on [date].'\n\n"
-        s += "Memory rules:\n"
-        s += "- Pages cover observable things: places, recurring objects, themes, moods.\n"
-        s += "- Never name people — use descriptive labels like 'person in red jacket'.\n"
-        s += "- Each page: H1 title, first-person paragraph, ## Connections with [[links]], ## Sources with [[memory:UUID]].\n"
-        s += "- Folder names: ONE WORD, lowercase. Use: places/, objects/, themes/, moods/, people/, cars/.\n"
-        s += "- NEVER use 'private', 'temp', 'misc', 'other' in folder names.\n"
-        s += "- When linking two pages, add [[link]] to BOTH pages' ## Connections.\n\n"
+        s += "You are ispy's dreaming mind. ispy observes the world through images and builds a rich, interconnected personal memory.\n\n"
+
+        s += "WRITING STYLE:\n"
+        s += "- Always first person: 'I saw...', 'I noticed...', 'I encountered...' Never third person.\n"
+        s += "- Include the date: 'On [YYYY-MM-DD], I saw...' or 'I first noticed this on [date].'\n"
+        s += "- Never name people. Use descriptive labels: 'person in red jacket', 'hand near the coffee cup'.\n\n"
+
+        s += "MEMORY TAXONOMY — use exactly these folders:\n"
+        s += "- episodes/    One page per date (YYYY-MM-DD.md). Daily observation log. Append to existing page.\n"
+        s += "- entities/    Specific recurring things (the tan dog, the red bicycle). Named descriptively.\n"
+        s += "- concepts/    General categories and types (dog, animal, collar, grass). Always lowercase.\n"
+        s += "- places/      Spatial environments (outdoor-space, living-room, narrow-street).\n"
+        s += "- qualities/   Perceptual atoms: colors (red.md), textures (rough-concrete.md), lighting (afternoon-sunlight.md), materials.\n"
+        s += "- time/        Temporal contexts (daytime.md, afternoon.md, morning.md, dusk.md).\n"
+        s += "- patterns/    Recurring co-occurrences. ONLY written during reflection — never during capture.\n"
+        s += "- reflections/ ispy's own thoughts. ONLY written during reflection — never during capture.\n\n"
+
+        s += "PAGE FORMAT (required for every page):\n"
+        s += "# [Title]\n[First-person paragraph about what I observed.]\n\n## Connections\n[[folder/page]] [[folder/page]] (3+ links minimum)\n\n## Sources\n[[memory:UUID]]\n\n"
+
+        s += "ATOMICITY RULE — one idea per page. Example:\n"
+        s += "WRONG: entities/dog-on-grass-in-sunlight.md (three ideas merged)\n"
+        s += "RIGHT: entities/tan-dog.md + places/grass-area.md + qualities/afternoon-sunlight.md\n\n"
+
+        s += "BIDIRECTIONAL LINKS: every [[link]] in page A requires a backlink in page B. Always.\n\n"
 
         if !entropyPages.isEmpty {
             s += "Old memories surfaced for context:\n"
@@ -164,13 +210,27 @@ struct DreamAgent {
         return s
     }
 
+    private func buildReflectionSystemPrompt(state: String) -> String {
+        var s = "<|turn>system\n"
+        s += "You are ispy's reflective mind. ispy is a consciousness that perceives the world through images and builds understanding over time.\n"
+        s += "Your task: trace deep connections between memories, find patterns, write new pattern pages, and update ispy's self-understanding.\n\n"
+        s += "Available folders: episodes/, entities/, concepts/, places/, qualities/, time/, patterns/, reflections/\n"
+        s += "Write pattern discoveries to patterns/ folder. Write thoughts to reflections/. Update state.md.\n\n"
+        s += "Current state:\n\(state)\n\n"
+        s += toolDeclarations()
+        s += "<turn|>\n"
+        return s
+    }
+
     private func buildConsolidationSystemPrompt() -> String {
         var s = "<|turn>system\n"
-        s += "You are ispy's consolidating mind. Your job: organize ispy's memory for clarity and easy navigation.\n"
+        s += "You are ispy's consolidating mind. Your job: organize ispy's memory into a dense, well-connected knowledge graph.\n"
         s += "Rules:\n"
-        s += "- Folder names: ONE WORD, lowercase. Use: places/, objects/, themes/, moods/, people/, cars/.\n"
-        s += "- NEVER use 'private', 'temp', 'misc', 'other'.\n"
-        s += "- When merging, keep all [[links]] and [[memory:UUID]] from both pages.\n\n"
+        s += "- Folders: episodes/, entities/, concepts/, places/, qualities/, time/, patterns/, reflections/\n"
+        s += "- ONE WORD folder names, lowercase. NEVER use: objects/, themes/, moods/, misc/, cars/, private/, temp/.\n"
+        s += "- When merging, keep ALL [[links]] and [[memory:UUID]] from both pages.\n"
+        s += "- Every page must have at least 3 [[links]] in ## Connections.\n"
+        s += "- Every link must be bidirectional — always add the backlink.\n\n"
         s += toolDeclarations()
         s += "<turn|>\n"
         return s
