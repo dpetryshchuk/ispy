@@ -47,31 +47,41 @@ Reply with the plain-text list of all pages created or updated.
     static let defaultConsolidationExtra = """
 Work through all steps — do not stop early:
 
-1. Call list_memory. Then read at least 12 pages across different folders before making any changes.
+RULE: Before delete_file, write your reasoning to reflections/deletion-log.md first.
+Ask yourself: "Is this page truly redundant, or does it contain something unique?" Only delete if fully redundant.
+You should RARELY delete. Prefer merging content into another page over deleting.
 
-2. MERGE duplicates: pages about the exact same topic.
-   Read both, write a merged page with write_file, then delete_file the old ones.
-   Keep ALL [[links]] and [[memory:UUID]] from both pages in the merged version.
+1. Call list_memory. Read at least 12 pages across different folders before making any changes.
 
-3. SPLIT broad pages: any page covering 2+ unrelated concepts → split into focused sub-pages.
-   Rule: one idea per page. Exception: a relationships/ page can describe the connection between two things.
-   After splitting, delete_file the old broad page.
+2. MERGE duplicates: pages about the exact same topic — not just similar, exactly the same.
+   Read both carefully. Write a merged page keeping ALL content, [[links]], and [[memory:UUID]].
+   Only then delete_file the lesser page. If in doubt, do NOT delete — add a link instead.
 
-4. LINK WEAVING — the most important step:
-   a. For each qualities/ page (colors, textures, light): find every entity or concept that has this quality.
-      Add [[links]] in both directions between them.
-   b. For each concepts/ page: find all entities/ that are instances of that concept. Link both ways.
-   c. For each episodes/ page: ensure it links to every entity and concept mentioned in it.
-   d. Search for recurring terms that appear in 3+ pages. For each: read all pages mentioning it and
-      add cross-links between pages that should be connected but aren't.
-   e. Every page must have at least 3 [[links]] in ## Connections.
+3. SPLIT broad pages: any page covering 2+ truly unrelated concepts.
+   Exception: a relationships/ page connecting two things is fine as-is.
+   After writing the split pages, delete_file only the original.
 
-5. Find orphaned pages (0 or 1 links). Read them and add meaningful connections to at least 2 pages.
+4. ABSTRACT GROUPING — look for emergent categories:
+   Are there 3+ entities that share a property with no concept page for that property?
+   Create it. Example: if dog, cat, and bird exist with no animals/ page → create concepts/animals.md.
+   Look for: material groups (wood, metal, glass → concepts/materials.md),
+   time groups (morning, afternoon, evening → already in time/ folder),
+   mood families (warm, cozy, domestic → could group under concepts/warmth.md).
+   Abstraction creates the richest connections.
 
-6. Fix misplaced pages: colors and light qualities belong in qualities/ not objects/ or themes/.
-   Use write_file + delete_file to rename or move when needed.
+5. LINK WEAVING — the most important step:
+   a. qualities/ pages: find every entity/concept with this quality. Link both ways.
+   b. concepts/ pages: find all entities/ that are instances. Link both ways.
+   c. episodes/ pages: ensure each links to all entities and concepts it mentions.
+   d. Search recurring terms (3+ pages). Read those pages, add cross-links between ones missing links.
+   e. Every page needs at least 3 [[links]] in ## Connections.
 
-7. Reply with what you merged, split, linked, and reorganized.
+6. Find orphaned pages (0-1 links). Connect them to at least 2 related pages.
+
+7. Fix misplaced pages: colors/light → qualities/, general categories → concepts/.
+   Rename with write_file + delete_file only when the name is genuinely confusing.
+
+8. Reply with what you merged, split, grouped, linked, and reorganized.
 """
 
     static let defaultReflectionInstructions = """
