@@ -2,10 +2,12 @@ import SwiftUI
 
 struct DevSettingsView: View {
     let promptConfig: PromptConfig
+    let memoryStore: MemoryStore
     @Binding var devStageOverride: Int?
 
     @State private var stageEnabled = false
     @State private var stageValue: Double = 0
+    @State private var showDeleteConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -32,6 +34,16 @@ struct DevSettingsView: View {
                     Button("Reset All to Defaults", role: .destructive) {
                         promptConfig.resetToDefaults()
                     }
+                    Button("Delete All Salients", role: .destructive) {
+                        showDeleteConfirm = true
+                    }
+                }
+                .confirmationDialog(
+                    "Delete all \(memoryStore.entries.count) salients?",
+                    isPresented: $showDeleteConfirm,
+                    titleVisibility: .visible
+                ) {
+                    Button("Delete All", role: .destructive) { memoryStore.deleteAll() }
                 }
             }
             .navigationTitle("Dev Settings")

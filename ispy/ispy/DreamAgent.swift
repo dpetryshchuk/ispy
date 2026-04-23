@@ -24,6 +24,7 @@ struct DreamAgent {
             await log.append("[\(i+1)/\(captures.count)] \(capture.timestamp.formatted(.iso8601))")
             try await processCapture(capture, entropyPages: entropyPages, memoryStore: memoryStore)
             try? wikiStore.markDreamed(upTo: capture.timestamp)
+            try? memoryStore.updateDream(id: capture.id, dreamDescription: "processed")
         }
         await log.append("Consolidation started")
         try await runConsolidationPass()

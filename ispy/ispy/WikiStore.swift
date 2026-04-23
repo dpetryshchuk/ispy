@@ -157,13 +157,16 @@ final class WikiStore {
         guard let enumerator = FileManager.default.enumerator(
             at: wikiDir, includingPropertiesForKeys: nil
         ) else { return "(no results)" }
-        let lower = query.lowercased()
+        let words = query.lowercased().components(separatedBy: .whitespacesAndNewlines)
+            .filter { $0.count > 2 }
+        guard !words.isEmpty else { return "(no results)" }
         var results: [String] = []
         let base = wikiDir.standardizedFileURL.path + "/"
         for case let url as URL in enumerator {
             guard url.pathExtension == "md",
-                  let content = try? String(contentsOf: url, encoding: .utf8),
-                  content.lowercased().contains(lower) else { continue }
+                  let content = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            let lower = content.lowercased()
+            guard words.contains(where: { lower.contains($0) }) else { continue }
             let p = url.standardizedFileURL.path
             guard p.hasPrefix(base) else { continue }
             let rel = String(p.dropFirst(base.count))

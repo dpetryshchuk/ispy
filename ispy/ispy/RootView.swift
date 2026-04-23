@@ -84,6 +84,7 @@ struct RootView: View {
         .sheet(isPresented: $showDevSettings) {
             DevSettingsView(
                 promptConfig: promptConfig,
+                memoryStore: memoryStore,
                 devStageOverride: $devStageOverride
             )
         }

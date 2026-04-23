@@ -120,6 +120,7 @@ struct IspyView: View {
                 Color.clear.frame(height: 32)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal)
     }
 }

@@ -90,6 +90,13 @@ final class MemoryStore {
         entries = allEntries()
     }
 
+    func deleteAll() {
+        for dir in allDayDirectories() {
+            try? FileManager.default.removeItem(at: dir)
+        }
+        entries = []
+    }
+
     func photoURL(for entry: MemoryEntry) -> URL {
         dayPhotosDir(for: entry.timestamp).appendingPathComponent(entry.photoFilename)
     }

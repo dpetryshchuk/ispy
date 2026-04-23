@@ -11,9 +11,8 @@ You MUST perform all of these steps — do not skip any:
 2. Call search_memory with 2-3 key terms from the observation to find related pages.
 3. Call read_file on EVERY page that could be related — read before you write.
 4. You MUST call write_file or edit_file at least once. Create a new page if nothing fits. Do not finish without writing.
-5. Call delete_file on any empty or duplicate pages you notice.
-6. Add [[memory:{MEMORY_ID}]] to every page you touch under ## Sources.
-7. Reply with a short plain-text summary of what you wrote.
+5. Add [[memory:{MEMORY_ID}]] to every page you touch under ## Sources.
+6. Reply with a short plain-text summary of what you wrote.
 """
 
     static let defaultConsolidationExtra = """
