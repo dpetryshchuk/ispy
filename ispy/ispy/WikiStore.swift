@@ -67,6 +67,9 @@ final class WikiStore {
 
 I am very new. I have seen almost nothing.
 
+## Name
+(none yet)
+
 ## What I Know
 The world comes to me in flashes — images, brief and vivid, then gone. I do not know where I am. I do not know what I am. I only know what I have seen, and I have seen very little.
 

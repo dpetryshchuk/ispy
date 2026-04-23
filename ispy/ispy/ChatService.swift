@@ -242,7 +242,8 @@ final class ChatService {
         var s = "<|turn>system\n"
         s += promptConfig.chatPersonalityPrompt + "\n\n"
         let state = wikiStore.readState()
-        s += "--- YOUR CURRENT STATE OF MIND ---\n\(state)\n\n"
+        s += "--- YOUR CURRENT STATE OF MIND (file: state.md) ---\n\(state)\n\n"
+        s += "To update your state of mind, use write_file or edit_file on path \"state.md\".\n\n"
         s += toolDeclarations()
         s += "<turn|>\n"
         return s
