@@ -15,6 +15,13 @@ struct WikiPage: Identifiable {
 struct CacheEntry: Codable {
     let page: String
     var lastSeen: Date
+    var accessCount: Int
+
+    init(page: String, lastSeen: Date, accessCount: Int = 1) {
+        self.page = page
+        self.lastSeen = lastSeen
+        self.accessCount = accessCount
+    }
 }
 
 final class WikiStore {
@@ -90,6 +97,22 @@ Never.
         try data.write(to: dreamStateURL)
     }
 
+    func resetDreamCursor() {
+        try? FileManager.default.removeItem(at: dreamStateURL)
+    }
+
+    func deleteAllWikiPages() {
+        guard let items = try? FileManager.default.contentsOfDirectory(
+            at: wikiDir, includingPropertiesForKeys: nil, options: .skipsHiddenFiles
+        ) else { return }
+        for item in items {
+            let name = item.lastPathComponent
+            guard name != "state.md" && name != "index.md" else { continue }
+            try? FileManager.default.removeItem(at: item)
+        }
+        updateWikiIndex()
+    }
+
     // MARK: - Cache
 
     func cacheEntries() -> [CacheEntry] {
@@ -108,12 +131,23 @@ Never.
         )
     }
 
+    func topAccessedPages(limit: Int) -> [String] {
+        Array(
+            cacheEntries()
+                .sorted { $0.accessCount > $1.accessCount }
+                .map(\.page)
+                .filter { FileManager.default.fileExists(atPath: wikiDir.appendingPathComponent($0).path) }
+                .prefix(limit)
+        )
+    }
+
     private func touchCache(page: String) {
         var list = cacheEntries()
         if let idx = list.firstIndex(where: { $0.page == page }) {
             list[idx].lastSeen = Date()
+            list[idx].accessCount += 1
         } else {
-            list.append(CacheEntry(page: page, lastSeen: Date()))
+            list.append(CacheEntry(page: page, lastSeen: Date(), accessCount: 1))
         }
         if list.count > 200 {
             list = Array(list.sorted { $0.lastSeen > $1.lastSeen }.prefix(200))

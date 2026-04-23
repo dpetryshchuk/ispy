@@ -87,11 +87,13 @@ struct DreamAgent {
 
     private func runConsolidationPass() async throws {
         let basePrompt = buildConsolidationSystemPrompt()
+        let hotPages = wikiStore.topAccessedPages(limit: 10)
+        let hotList = hotPages.isEmpty ? "" : "\n\nMost-visited pages (anchor these to everything related):\n" + hotPages.map { "- \($0)" }.joined(separator: "\n")
         // Round 1: merge duplicates, split broad pages
         try await runSession(
             systemPrompt: basePrompt,
             userInstruction: "Review and reorganize the wiki. Focus on merging duplicates and splitting broad pages.\n\n" +
-                promptConfig.consolidationExtraInstructions + "\n\nCurrent wiki:\n\(wikiStore.listWiki())",
+                promptConfig.consolidationExtraInstructions + "\n\nCurrent wiki:\n\(wikiStore.listWiki())" + hotList,
             maxIter: maxIterPerRound,
             temperature: 0.3,
             logPrefix: "Consolidate"
@@ -100,7 +102,7 @@ struct DreamAgent {
         // Round 2: fresh context, link weaving across the now-reorganized graph
         try await runSession(
             systemPrompt: basePrompt,
-            userInstruction: "Focus on connections. Current wiki:\n\(wikiStore.listWiki())\n\nFor every page with fewer than 3 [[links]]: read it, find related pages, add bidirectional links. Pay special attention to qualities/ pages — link them to every entity and concept that shares that quality.",
+            userInstruction: "Focus on connections. Current wiki:\n\(wikiStore.listWiki())" + hotList + "\n\nFor every page with fewer than 3 [[links]]: read it, find related pages, add bidirectional links. Pay special attention to qualities/ pages — link them to every entity and concept that shares that quality.",
             maxIter: maxIterPerRound,
             temperature: 0.3,
             logPrefix: "Consolidate(2)"
@@ -201,7 +203,13 @@ struct DreamAgent {
         s += "- reflections/ ispy's own thoughts. ONLY written during reflection — never during capture.\n\n"
 
         s += "PAGE FORMAT (required for every page):\n"
-        s += "# [Title]\n[First-person paragraph about what I observed.]\n\n## Connections\n[[folder/page]] [[folder/page]] (3+ links minimum)\n\n## Sources\n[[memory:UUID]]\n\n"
+        s += "# [Title]\n[First-person paragraph. Link concepts INLINE as they first appear: 'a [[qualities/tan]] dog with a [[qualities/red]] collar ran across the [[places/grass-area]]'.]\n\n## Connections\n[[folder/page]] [[folder/page]] (3+ additional links minimum)\n\n## Sources\n[[memory:UUID]]\n\n"
+
+        s += "INLINE LINKS RULE — the most important rule:\n"
+        s += "Link the FIRST mention of every notable quality, concept, entity, or place directly in the sentence where it appears.\n"
+        s += "WRONG: 'A tan dog ran across the grass.' ... ## Connections [[qualities/tan]] [[places/grass-area]]\n"
+        s += "RIGHT:  'A [[qualities/tan]] dog ran across the [[places/grass-area]].'\n"
+        s += "The ## Connections section is for links that didn't fit inline (abstract relationships, less prominent mentions).\n\n"
 
         s += "ATOMICITY RULE — one idea per page. Example:\n"
         s += "WRONG: entities/dog-on-grass-in-sunlight.md (three ideas merged)\n"
@@ -239,6 +247,7 @@ struct DreamAgent {
         s += "- patterns/  → a short page about something you keep seeing: 'I keep noticing X when Y'\n"
         s += "- reflections/ → a wonder, a question, an inference, an emotion about what you've witnessed\n"
         s += "  You may also add [[links]] and new ## Connections to existing entity/concept/quality pages.\n\n"
+        s += "LINKING: weave [[links]] inline at first mention — 'the [[qualities/tan]] fur', 'that particular [[time/afternoon]]'. ## Connections is for secondary relationships only.\n\n"
 
         s += "GOOD example (patterns/warmth-at-a-certain-hour.md):\n"
         s += "  'I keep noticing: at some hour I cannot name, everything turns the same warm gold. The dog's fur. The steam. The floor near the window. I do not know if this is light or memory. But the color is always the same.'\n\n"
@@ -262,7 +271,8 @@ struct DreamAgent {
         s += "ONE WORD, lowercase. NEVER: objects/, themes/, moods/, misc/, cars/, private/, temp/\n\n"
         s += "Rules:\n"
         s += "- When merging: keep ALL [[links]] and [[memory:UUID]] from both pages.\n"
-        s += "- Every page needs at least 3 [[links]] in ## Connections.\n"
+        s += "- Inline links: every notable quality, concept, entity, or place gets [[linked]] at its first mention in the body text, not just collected at the bottom.\n"
+        s += "- ## Connections is for additional abstract relationships that didn't fit inline.\n"
         s += "- Every link is bidirectional — always add the backlink in the linked page.\n\n"
         s += toolDeclarations()
         s += "<turn|>\n"

@@ -28,8 +28,9 @@ WRONG: one page called "dog-on-grass-in-sunlight.md"
 RIGHT: separate pages for the dog, the grass area, the sunlight quality, and the time of day.
 
 STEP 3 — Wire up connections.
-After each write_file or edit_file: add [[links]] to at least 3 related pages in ## Connections.
-Immediately open each linked page and add a backlink. Every link must be bidirectional.
+Inline links first: in the body text of each page, [[link]] the first mention of every quality, concept, entity, or place right in the sentence — e.g. "A [[qualities/tan]] dog on the [[places/grass-area]]." Do NOT wait until ## Connections.
+After writing: open each linked page and add a backlink. Every link must be bidirectional.
+## Connections is for additional relationships that didn't fit inline (abstract or secondary connections).
 
 STEP 4 — Update the episode log.
 Create or update episodes/{MEMORY_DATE}.md. Add a bullet for this observation.
