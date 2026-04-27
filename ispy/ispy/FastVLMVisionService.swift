@@ -1,6 +1,7 @@
 import CoreImage
 import Foundation
 import MLX
+import MLXHuggingFace
 import MLXLMCommon
 import MLXVLM
 import UIKit
@@ -44,12 +45,15 @@ final class FastVLMVisionService {
         state = .downloading(0)
         do {
             container = try await VLMModelFactory.shared.loadContainer(
-                configuration: VLMRegistry.fastvlm
-            ) { [weak self] progress in
-                Task { @MainActor [weak self] in
-                    self?.state = .downloading(progress.fractionCompleted)
+                from: #hubDownloader(),
+                using: #huggingFaceTokenizerLoader(),
+                configuration: VLMRegistry.fastvlm,
+                progressHandler: { [weak self] progress in
+                    Task { @MainActor [weak self] in
+                        self?.state = .downloading(progress.fractionCompleted)
+                    }
                 }
-            }
+            )
             state = .ready
         } catch {
             state = .error(error.localizedDescription)
