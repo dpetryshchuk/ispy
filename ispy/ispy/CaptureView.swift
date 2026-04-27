@@ -29,7 +29,7 @@ struct BatchEntry: Identifiable {
 // MARK: - CaptureView
 
 struct CaptureView: View {
-    let gemmaService: GemmaVisionService
+    let fastVLMService: FastVLMVisionService
     let memoryStore: MemoryStore
 
     @StateObject private var camera = CameraCapture()
@@ -82,15 +82,23 @@ struct CaptureView: View {
                               let image = UIImage(data: data) else { return }
                         selectedImage = image
                         reset()
-                        if gemmaService.state.isReady { analyze(image: image) }
+                        if fastVLMService.state.isReady { analyze(image: image) }
                     }
                 } else {
                     // Multi-pick — batch flow
                     startBatch(captured)
                 }
             }
-            .onAppear { camera.start() }
+            .onAppear {
+                camera.start()
+                Task { await fastVLMService.load() }
+            }
             .onDisappear { camera.stop() }
+            .onChange(of: fastVLMService.state) { _, newState in
+                if newState == .ready, let image = selectedImage, description == nil, !isAnalyzing {
+                    analyze(image: image)
+                }
+            }
         }
     }
 
@@ -137,7 +145,7 @@ struct CaptureView: View {
                 camera.capturePhoto { image in
                     selectedImage = image
                     errorMessage = image == nil ? "Capture failed" : nil
-                    if let image, gemmaService.state.isReady { analyze(image: image) }
+                    if let image, fastVLMService.state.isReady { analyze(image: image) }
                 }
             } label: {
                 ZStack {
@@ -219,7 +227,7 @@ struct CaptureView: View {
                 batch[i].status = .analyzing
 
                 do {
-                    let desc = try await gemmaService.describe(image: image)
+                    let desc = try await fastVLMService.describe(image: image)
                     try? memoryStore.save(image: image, description: desc)
                     batch[i].status = .saved
                 } catch {
@@ -240,14 +248,31 @@ struct CaptureView: View {
                     .cornerRadius(10)
 
                 if isAnalyzing {
-                    VStack(spacing: 16) {
+                    VStack(spacing: 12) {
                         IspyShapeView(
                             stageIndex: evolutionStageIndex(for: memoryStore.entries.count),
                             size: 90,
                             isAnalyzing: true
                         )
-                        Text("Thinking…")
-                            .font(.caption).foregroundStyle(.secondary)
+                        if fastVLMService.streamingOutput.isEmpty {
+                            Text("Analyzing…")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            ScrollViewReader { proxy in
+                                ScrollView {
+                                    Text(fastVLMService.streamingOutput)
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .id("stream")
+                                        .padding(.horizontal, 4)
+                                }
+                                .frame(maxHeight: 110)
+                                .onChange(of: fastVLMService.streamingOutput) { _, _ in
+                                    withAnimation { proxy.scrollTo("stream", anchor: .bottom) }
+                                }
+                            }
+                        }
                     }
                 } else if let desc = description {
                     resultSection(image: image, desc: desc)
@@ -255,12 +280,20 @@ struct CaptureView: View {
                     VStack(spacing: 8) {
                         Button("Analyze") { analyze(image: image) }
                             .buttonStyle(.borderedProminent)
-                            .disabled(!gemmaService.state.isReady)
+                            .disabled(!fastVLMService.state.isReady)
                         Button("Retake") { clearAll() }.buttonStyle(.bordered)
-                        if !gemmaService.state.isReady {
-                            Text("Load Gemma 4 in the Capture tab first")
+                        if case .downloading(let p) = fastVLMService.state {
+                            ProgressView(value: p)
+                                .frame(width: 120)
+                            Text("Downloading model…")
                                 .font(.caption).foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
+                        } else if fastVLMService.state == .loading {
+                            ProgressView()
+                            Text("Loading model…")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else if fastVLMService.state == .idle {
+                            Text("Loading FastVLM…")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -375,11 +408,11 @@ struct CaptureView: View {
 
     @ViewBuilder
     private var modelStatusIndicator: some View {
-        switch gemmaService.state {
-        case .needsDownload:
-            Button("Get Model") { Task { await gemmaService.download() } }.font(.caption)
-        case .downloading:
-            ProgressView(value: gemmaService.downloadProgress).frame(width: 60).scaleEffect(0.8)
+        switch fastVLMService.state {
+        case .idle:
+            Button("Load FastVLM") { Task { await fastVLMService.load() } }.font(.caption)
+        case .downloading(let p):
+            ProgressView(value: p).frame(width: 60).scaleEffect(0.8)
         case .loading:
             ProgressView().scaleEffect(0.7)
         case .error:
@@ -394,7 +427,7 @@ struct CaptureView: View {
     private func analyze(image: UIImage) {
         isAnalyzing = true; errorMessage = nil
         Task {
-            do { description = try await gemmaService.describe(image: image) }
+            do { description = try await fastVLMService.describe(image: image) }
             catch { errorMessage = error.localizedDescription }
             isAnalyzing = false
         }

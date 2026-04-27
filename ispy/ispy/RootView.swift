@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     private let gemmaService: GemmaVisionService
+    private let fastVLMService: FastVLMVisionService
     private let memoryStore: MemoryStore
     private let wikiStore: WikiStore
     private let dreamLog: DreamLog
@@ -10,16 +11,17 @@ struct RootView: View {
     private let promptConfig: PromptConfig
 
     @State private var selectedTab = 0
-    @State private var showDevSettings = false
     @State private var devStageOverride: Int? = nil
 
     init() {
         let gemma = GemmaVisionService()
+        let fastVLM = FastVLMVisionService()
         let memory = MemoryStore()
         let wiki = WikiStore()
         let log = DreamLog()
         let prompts = PromptConfig()
         self.gemmaService = gemma
+        self.fastVLMService = fastVLM
         self.memoryStore = memory
         self.wikiStore = wiki
         self.dreamLog = log
@@ -31,35 +33,21 @@ struct RootView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
 
-            // MARK: ispy home
-            NavigationStack {
-                IspyView(
-                    captureCount: memoryStore.entries.count,
-                    wikiPageCount: wikiStore.pageCount(),
-                    connectionCount: wikiStore.connectionCount(),
-                    isDreaming: dreamService.isRunning,
-                    pendingCount: {
-                        let cursor = wikiStore.lastDreamed ?? .distantPast
-                        return memoryStore.entries.filter { $0.timestamp > cursor }.count
-                    }(),
-                    devStageOverride: devStageOverride
-                )
-                .navigationTitle("ispy")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button { showDevSettings = true } label: {
-                            Image(systemName: "gearshape")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
+            // MARK: ispy chat (home)
+            ChatView(
+                chatService: chatService,
+                gemmaService: gemmaService,
+                memoryStore: memoryStore,
+                wikiStore: wikiStore,
+                dreamService: dreamService,
+                promptConfig: promptConfig,
+                devStageOverride: $devStageOverride
+            )
             .tabItem { Label("ispy", systemImage: "moon.stars") }
             .tag(0)
 
             // MARK: Capture
-            CaptureView(gemmaService: gemmaService, memoryStore: memoryStore)
+            CaptureView(fastVLMService: fastVLMService, memoryStore: memoryStore)
                 .tabItem { Label("Capture", systemImage: "camera.fill") }
                 .tag(1)
 
@@ -68,25 +56,27 @@ struct RootView: View {
                 .tabItem { Label("Experiences", systemImage: "photo.stack") }
                 .tag(2)
 
-            // MARK: Memory (knowledge base + dream + chat)
+            // MARK: Memory (knowledge base + dream)
             MindView(
                 wikiStore: wikiStore,
                 memoryStore: memoryStore,
                 dreamService: dreamService,
-                dreamLog: dreamLog,
-                chatService: chatService,
-                gemmaService: gemmaService
+                dreamLog: dreamLog
             )
             .tabItem { Label("Memory", systemImage: "sparkles") }
             .tag(3)
-        }
-        .sheet(isPresented: $showDevSettings) {
-            DevSettingsView(
-                promptConfig: promptConfig,
-                memoryStore: memoryStore,
-                wikiStore: wikiStore,
-                devStageOverride: $devStageOverride
+
+            // MARK: ispy creature (tamagotchi)
+            IspyView(
+                captureCount: memoryStore.entries.count,
+                wikiPageCount: wikiStore.allPages().count,
+                connectionCount: wikiStore.connectionCount(),
+                isDreaming: dreamService.isRunning,
+                pendingCount: memoryStore.entries.filter { $0.dreamDescription == nil }.count,
+                devStageOverride: devStageOverride
             )
+            .tabItem { Label("creature", systemImage: "sparkle") }
+            .tag(4)
         }
         .task {
             await gemmaService.start()
