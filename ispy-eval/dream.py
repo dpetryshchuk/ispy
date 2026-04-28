@@ -180,18 +180,23 @@ def run_session(
     verbose: bool = False,
 ) -> str:
     """Run one multi-turn tool-use session. Returns final assistant text."""
+    if max_turns < 1:
+        raise ValueError(f"max_turns must be >= 1, got {max_turns}")
+
     from mlx_lm import generate
 
     messages = [
         {"role": "user", "content": system_prompt + "\n\n" + user_message},
     ]
 
+    last_output = ""
     final_output = ""
     for turn in range(max_turns):
         prompt = tokenizer.apply_chat_template(
             messages, add_generation_prompt=True, tokenize=False
         )
         output = generate(model, tokenizer, prompt=prompt, max_tokens=max_tokens, verbose=False)
+        last_output = output
 
         if verbose:
             print(f"  [turn {turn + 1}] {output[:120].replace(chr(10), ' ')}")
@@ -208,5 +213,7 @@ def run_session(
 
         messages.append({"role": "assistant", "content": output})
         messages.append({"role": "user", "content": f"<tool_response>{result}</tool_response>"})
+    else:
+        final_output = last_output  # hit max_turns; return last model output
 
     return final_output
