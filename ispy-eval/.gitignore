@@ -1,0 +1,6 @@
+data/photos/
+data/descriptions.json
+data/runs/
+__pycache__/
+*.pyc
+.env
