@@ -1,4 +1,14 @@
 # ispy-eval/dream.py
+# Phase 2 of the pipeline: run the three-pass dream cycle on cached photo descriptions.
+# This replicates what DreamAgent.swift does on the iPhone, but in Python on your Mac.
+#
+# Three passes:
+#   1. Memory   — one session per photo; builds wiki pages from the description
+#   2. Reflection — one session over the whole wiki; finds patterns and wonders
+#   3. Consolidation — one session; merges duplicates, weaves links
+#
+# Run: python dream.py --verbose
+
 from __future__ import annotations
 import json
 import os
@@ -6,7 +16,11 @@ import re
 from pathlib import Path
 
 
+# ── Environment ───────────────────────────────────────────────────────────────
+
 def _load_dotenv() -> None:
+    # Reads .env and sets environment variables (e.g. HF_TOKEN for model downloads).
+    # os.environ.setdefault means the shell always wins over the file.
     env = Path(__file__).parent / ".env"
     if env.exists():
         for line in env.read_text().splitlines():
@@ -17,12 +31,21 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 
+# ── WikiStore — the model's filesystem ───────────────────────────────────────
+#
+# The model writes memory pages as markdown files inside a directory.
+# WikiStore is the Python equivalent of WikiStore.swift — it gives the model
+# six "tools" it can call: list, read, write, edit, delete, search.
+# The model never sees raw file paths; it always goes through these methods.
+
 class WikiStore:
     def __init__(self, wiki_dir: Path):
         self.wiki_dir = wiki_dir
-        wiki_dir.mkdir(parents=True, exist_ok=True)
+        wiki_dir.mkdir(parents=True, exist_ok=True)  # create the directory if needed
 
     def list_memory(self) -> str:
+        # Returns an index of all pages, formatted like ispy's index.md.
+        # index.md and state.md are excluded — they're housekeeping files, not memories.
         pages = sorted(
             p for p in self.wiki_dir.rglob("*.md")
             if p.name not in ("index.md", "state.md")
@@ -33,18 +56,24 @@ class WikiStore:
         return "# Memory Index\n\n" + "\n".join(f"- [[{p}]]" for p in paths)
 
     def read_file(self, path: str) -> str:
+        # Returns the file contents, or a clear error string if the file doesn't exist.
+        # Returning a string (not raising) keeps the model's tool loop running.
         full = self.wiki_dir / path
         if not full.exists():
             return f"(file not found: {path})"
         return full.read_text(encoding="utf-8")
 
     def write_file(self, path: str, content: str) -> str:
+        # Creates or overwrites a file. Creates parent directories automatically.
+        # Returning "ok" tells the model the tool call succeeded.
         full = self.wiki_dir / path
         full.parent.mkdir(parents=True, exist_ok=True)
         full.write_text(content, encoding="utf-8")
         return "ok"
 
     def edit_file(self, path: str, old: str, new: str) -> str:
+        # Replaces the first occurrence of `old` with `new` inside an existing file.
+        # Used for small targeted edits (e.g. adding a backlink) without rewriting the whole page.
         full = self.wiki_dir / path
         if not full.exists():
             return f"(file not found: {path})"
@@ -55,6 +84,7 @@ class WikiStore:
         return "ok"
 
     def delete_file(self, path: str) -> str:
+        # Permanently deletes a file (used during consolidation to remove duplicates).
         full = self.wiki_dir / path
         if not full.exists():
             return f"(file not found: {path})"
@@ -62,6 +92,8 @@ class WikiStore:
         return "ok"
 
     def search_memory(self, query: str) -> str:
+        # Full-text search: returns paths of files whose name or content contains the query.
+        # Case-insensitive. Used by the model to find related pages before writing.
         q = query.lower()
         results = [
             str(p.relative_to(self.wiki_dir))
@@ -71,6 +103,8 @@ class WikiStore:
         return "\n".join(results) if results else "(no results)"
 
     def dispatch(self, name: str, args: dict) -> str:
+        # Routes a tool call (name + args dict) to the right method.
+        # Called by run_session every time the model emits a tool call token.
         if name == "list_memory":
             return self.list_memory()
         if name == "read_file":
@@ -86,6 +120,15 @@ class WikiStore:
         return f"(unknown tool: {name})"
 
 
+# ── Tool call parsing ─────────────────────────────────────────────────────────
+#
+# The on-device Gemma model signals a tool call with a special token sequence:
+#   <|tool_call>call:TOOLNAME\n{"arg": "value"}<tool_call|>
+#
+# We parse this out of the model's raw text output.
+
+# Regex that captures the tool name and the JSON body between the markers.
+# re.DOTALL lets . match newlines (the JSON body can span multiple lines).
 _TOOL_PATTERN = re.compile(
     r'<\|tool_call>\s*call:([a-z_]+)\s*\{(.*)\}\s*<tool_call\|>',
     re.DOTALL,
@@ -93,17 +136,20 @@ _TOOL_PATTERN = re.compile(
 
 
 def preprocess_json(s: str) -> str:
-    """Escape literal newline/tab characters that appear inside JSON strings."""
+    # The model sometimes emits literal newline characters *inside* a JSON string value,
+    # which is invalid JSON (JSON requires \n not a real newline inside strings).
+    # This walks the string character by character, tracking whether we're inside a
+    # quoted string, and escapes any raw newlines/tabs it finds there.
     result: list[str] = []
     in_string = False
     i = 0
     while i < len(s):
         c = s[i]
         if c == '"' and (i == 0 or s[i - 1] != "\\"):
-            in_string = not in_string
+            in_string = not in_string  # toggle: entering or leaving a JSON string
             result.append(c)
         elif in_string and c == "\n":
-            result.append("\\n")
+            result.append("\\n")  # escape the literal newline
         elif in_string and c == "\t":
             result.append("\\t")
         elif in_string and c == "\r":
@@ -115,6 +161,8 @@ def preprocess_json(s: str) -> str:
 
 
 def parse_tool_call(output: str) -> tuple[str, dict] | None:
+    # Tries to find a tool call in the model output.
+    # Returns (tool_name, args_dict) if found, or None if the output is plain text.
     m = _TOOL_PATTERN.search(output)
     if not m:
         return None
@@ -124,11 +172,25 @@ def parse_tool_call(output: str) -> tuple[str, dict] | None:
         args = json.loads(preprocess_json(raw))
         return name, args
     except json.JSONDecodeError:
-        return None
+        return None  # malformed JSON — treat as plain text
 
 
-_Q = '"'  # quote character — matches ToolCallParser.strQ in DreamAgent.swift
+# ── System prompt builder ─────────────────────────────────────────────────────
+#
+# The system prompt tells the model who it is and what tools it has.
+# It uses the exact token format the on-device Gemma model was trained with:
+#   <|turn>system\n...content...<turn|>
+#
+# Tool declarations describe each tool's name, parameters, and return type.
+# This is identical to what DreamAgent.swift sends to the on-device model.
 
+_Q = '"'  # shorthand for a double-quote character inside f-strings
+
+# Each tool declaration block follows this structure:
+#   <|tool>declaration:TOOLNAME
+#   description:"..."
+#   ,parameters:{properties:{...},required:[...],type:"OBJECT"},response:{...}
+#   <tool|>
 TOOL_DECLARATIONS = (
     f'<|tool>declaration:list_memory\n'
     f'description:{_Q}List all pages in ispy\'s memory{_Q}\n'
@@ -172,6 +234,8 @@ TOOL_DECLARATIONS = (
 
 
 def build_system_prompt(role_preamble: str) -> str:
+    # Wraps a role description and the tool declarations in the model's system-turn format.
+    # role_preamble is different for each pass (memory / reflection / consolidation).
     return (
         "<|turn>system\n"
         + role_preamble
@@ -181,13 +245,19 @@ def build_system_prompt(role_preamble: str) -> str:
     )
 
 
+# ── Session runner ────────────────────────────────────────────────────────────
+#
+# One "session" = one complete conversation with the model until it stops calling tools.
+# The model alternates: text/tool-call → tool result → text/tool-call → ...
+# We feed it the tool result and it keeps going until it writes a plain-text reply.
+
 def run_session(
     model,
     tokenizer,
     system_prompt: str,
     wiki: WikiStore,
     user_message: str,
-    max_turns: int = 40,
+    max_turns: int = 40,   # safety cap — prevents infinite tool loops
     max_tokens: int = 2048,
     verbose: bool = False,
 ) -> str:
@@ -195,8 +265,10 @@ def run_session(
     if max_turns < 1:
         raise ValueError(f"max_turns must be >= 1, got {max_turns}")
 
-    from mlx_lm import generate
+    from mlx_lm import generate  # lazy import — mlx_lm only needed at runtime
 
+    # The system prompt is embedded as a prefix in the first user message.
+    # This matches the format used by DreamAgent.swift for the on-device model.
     messages = [
         {"role": "user", "content": system_prompt + "\n\n" + user_message},
     ]
@@ -204,9 +276,12 @@ def run_session(
     last_output = ""
     final_output = ""
     for turn in range(max_turns):
+        # apply_chat_template serialises the message list into a single string
+        # using the model's expected format (e.g. <start_of_turn>user\n...<end_of_turn>)
         prompt = tokenizer.apply_chat_template(
             messages, add_generation_prompt=True, tokenize=False
         )
+        # generate runs the model and returns the new tokens as a plain string
         output = generate(model, tokenizer, prompt=prompt, max_tokens=max_tokens, verbose=False)
         last_output = output
 
@@ -215,9 +290,11 @@ def run_session(
 
         tool_call = parse_tool_call(output)
         if tool_call is None:
+            # No tool call — the model is done. This is its final reply.
             final_output = output
             break
 
+        # Execute the tool and feed the result back as the next user message
         name, args = tool_call
         result = wiki.dispatch(name, args)
         if verbose:
@@ -226,19 +303,37 @@ def run_session(
         messages.append({"role": "assistant", "content": output})
         messages.append({"role": "user", "content": f"<tool_response>{result}</tool_response>"})
     else:
-        final_output = last_output  # hit max_turns; return last model output
+        # Loop exhausted max_turns without the model stopping — return whatever it last said
+        final_output = last_output
 
     return final_output
 
 
+# ── Model loader ──────────────────────────────────────────────────────────────
+
+# Models live in ispy-eval/models/gemma-4-E2B-it/.
+# Run download_models.py once to fetch them. After that, no internet needed.
+_GEMMA_MODEL_DIR = Path(__file__).parent / "models" / "gemma-4-E2B-it"
+
 def load_model():
-    """Load Gemma 4 E2B via mlx-lm. Downloads on first run (~3GB)."""
+    # Loads Gemma 4 E2B from the local models/ directory.
+    # Raises a clear error if you haven't run download_models.py yet.
+    if not _GEMMA_MODEL_DIR.exists():
+        raise FileNotFoundError(
+            f"Model not found at {_GEMMA_MODEL_DIR}\n"
+            "Run: python download_models.py"
+        )
     from mlx_lm import load
-    print("Loading google/gemma-4-E2B-it …")
-    model, tokenizer = load("google/gemma-4-E2B-it")
+    print(f"Loading {_GEMMA_MODEL_DIR.name} …")
+    model, tokenizer = load(str(_GEMMA_MODEL_DIR))
     print("Model ready.")
     return model, tokenizer
 
+
+# ── Role preambles (one per pass) ─────────────────────────────────────────────
+#
+# Each pass gives the model a different identity and goal.
+# These are prepended to the system prompt before the tool declarations.
 
 _MEMORY_PREAMBLE = (
     "You are ispy's dreaming mind. Descriptions of the world are arriving. "
@@ -260,27 +355,29 @@ _CONSOLIDATION_PREAMBLE = (
 )
 
 
+# ── Three-pass pipeline ───────────────────────────────────────────────────────
+
 def run_dream(
-    descriptions: list[dict],
-    run_dir: Path,
-    memory_prompt: str,
+    descriptions: list[dict],  # list of entries from descriptions.json
+    run_dir: Path,              # output folder for this experiment (data/runs/TIMESTAMP/)
+    memory_prompt: str,         # from prompts.py — the instructions for the memory pass
     reflection_prompt: str,
     consolidation_prompt: str,
     verbose: bool = False,
 ) -> Path:
-    """
-    Run the full three-pass dream pipeline.
-    Returns path to wiki directory.
-    """
+    """Run the full three-pass dream pipeline. Returns path to wiki directory."""
     wiki_dir = run_dir / "wiki"
     wiki = WikiStore(wiki_dir)
-    model, tokenizer = load_model()
+    model, tokenizer = load_model()  # loaded once, reused across all three passes
 
-    # Pass 1: Memory — one session per description
+    # ── Pass 1: Memory ────────────────────────────────────────────────────────
+    # One session per photo description. Each session builds several wiki pages
+    # for the concepts, entities, and qualities in that photo.
     memory_sys = build_system_prompt(_MEMORY_PREAMBLE)
     for i, entry in enumerate(descriptions):
         memory_id = entry["id"]
         description = entry["description"]
+        # The user message combines the prompt instructions with this specific observation
         user_msg = (
             f"{memory_prompt}\n\n"
             f"OBSERVATION (id: {memory_id}):\n{description}"
@@ -289,14 +386,18 @@ def run_dream(
             print(f"\n[Memory {i+1}/{len(descriptions)}] {memory_id}")
         run_session(model, tokenizer, memory_sys, wiki, user_msg, verbose=verbose)
 
-    # Pass 2: Reflection — single session over full wiki
+    # ── Pass 2: Reflection ────────────────────────────────────────────────────
+    # A single session that reads the whole wiki and writes pattern/reflection pages.
+    # We pass the current state.md into the preamble so the model knows where it is.
     state = wiki.read_file("state.md") if (wiki_dir / "state.md").exists() else "(no state yet)"
     reflection_sys = build_system_prompt(_REFLECTION_PREAMBLE + f"Current state:\n{state}\n\n")
     if verbose:
         print("\n[Reflection pass]")
     run_session(model, tokenizer, reflection_sys, wiki, reflection_prompt, verbose=verbose)
 
-    # Pass 3: Consolidation — single session
+    # ── Pass 3: Consolidation ─────────────────────────────────────────────────
+    # A single session that merges duplicate pages, weaves missing links, and
+    # ensures every page belongs to a valid folder.
     consolidation_sys = build_system_prompt(_CONSOLIDATION_PREAMBLE)
     if verbose:
         print("\n[Consolidation pass]")
@@ -304,6 +405,8 @@ def run_dream(
 
     return wiki_dir
 
+
+# ── CLI entry point ───────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import argparse
@@ -313,6 +416,7 @@ if __name__ == "__main__":
     parser.add_argument("--descriptions", default="data/descriptions.json")
     parser.add_argument("--run-dir", default=None, help="Output dir (default: data/runs/TIMESTAMP)")
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--model-dir", help="Local directory containing the model files (downloads if not provided)")
     args = parser.parse_args()
 
     import prompts as p

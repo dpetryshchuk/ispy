@@ -1,6 +1,7 @@
 data/photos/
 data/descriptions.json
 data/runs/
+models/
 __pycache__/
 *.pyc
 .env
