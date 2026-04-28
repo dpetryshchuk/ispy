@@ -1,8 +1,20 @@
 # ispy-eval/dream.py
 from __future__ import annotations
 import json
+import os
 import re
 from pathlib import Path
+
+
+def _load_dotenv() -> None:
+    env = Path(__file__).parent / ".env"
+    if env.exists():
+        for line in env.read_text().splitlines():
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                os.environ.setdefault(k.strip(), v.strip())
+
+_load_dotenv()
 
 
 class WikiStore:

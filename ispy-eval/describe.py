@@ -3,7 +3,19 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import os
 from pathlib import Path
+
+
+def _load_dotenv() -> None:
+    env = Path(__file__).parent / ".env"
+    if env.exists():
+        for line in env.read_text().splitlines():
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                os.environ.setdefault(k.strip(), v.strip())
+
+_load_dotenv()
 
 
 def load_cache(path: Path) -> list[dict]:
