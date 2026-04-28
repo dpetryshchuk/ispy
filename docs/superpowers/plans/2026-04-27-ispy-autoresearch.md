@@ -1435,11 +1435,11 @@ def propose_change(client: anthropic.Anthropic, current_prompts, history: list[d
         f"({'ACCEPTED' if h['accepted'] else 'REJECTED'}): {h['reasoning']}"
         for h in history[-10:]
     )
+    cur_score = f"{history[-1]['after']:.3f}" if history else "none yet"
     response = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1024,
-        cur_score = f"{history[-1]['after']:.3f}" if history else "none yet"
-    messages=[{"role": "user", "content": f"""\
+        messages=[{"role": "user", "content": f"""\
 You are optimizing prompts for ispy, an AI memory system that looks at photos and builds a wiki of observations.
 
 Current composite score: {cur_score} (higher is better, max 1.0)
