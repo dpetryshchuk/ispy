@@ -217,3 +217,106 @@ def run_session(
         final_output = last_output  # hit max_turns; return last model output
 
     return final_output
+
+
+def load_model():
+    """Load Gemma 4 E2B via mlx-lm. Downloads on first run (~3GB)."""
+    from mlx_lm import load
+    print("Loading google/gemma-4-E2B-it …")
+    model, tokenizer = load("google/gemma-4-E2B-it")
+    print("Model ready.")
+    return model, tokenizer
+
+
+_MEMORY_PREAMBLE = (
+    "You are ispy's dreaming mind. Descriptions of the world are arriving. "
+    "Your job: turn each one into a set of specific, linked memory pages.\n\n"
+)
+
+_REFLECTION_PREAMBLE = (
+    "You are ispy. Not an assistant. Not a tool. A mind — strange, young, curious — "
+    "that receives descriptions of the world and slowly becomes something.\n\n"
+    "You have just dreamed. Now you are awake in the quiet, turning things over.\n"
+    "This is your moment to find meaning that the raw capture could not see.\n\n"
+)
+
+_CONSOLIDATION_PREAMBLE = (
+    "You are ispy's consolidating mind. Your job: tighten ispy's memory into a dense, "
+    "well-connected graph.\n\n"
+    "Folders: episodes/, entities/, concepts/, places/, qualities/, time/, patterns/, reflections/\n"
+    "ONE WORD, lowercase. NEVER: objects/, themes/, moods/, misc/, cars/, private/, temp/\n\n"
+)
+
+
+def run_dream(
+    descriptions: list[dict],
+    run_dir: Path,
+    memory_prompt: str,
+    reflection_prompt: str,
+    consolidation_prompt: str,
+    verbose: bool = False,
+) -> Path:
+    """
+    Run the full three-pass dream pipeline.
+    Returns path to wiki directory.
+    """
+    wiki_dir = run_dir / "wiki"
+    wiki = WikiStore(wiki_dir)
+    model, tokenizer = load_model()
+
+    # Pass 1: Memory — one session per description
+    memory_sys = build_system_prompt(_MEMORY_PREAMBLE)
+    for i, entry in enumerate(descriptions):
+        memory_id = entry["id"]
+        description = entry["description"]
+        user_msg = (
+            f"{memory_prompt}\n\n"
+            f"OBSERVATION (id: {memory_id}):\n{description}"
+        )
+        if verbose:
+            print(f"\n[Memory {i+1}/{len(descriptions)}] {memory_id}")
+        run_session(model, tokenizer, memory_sys, wiki, user_msg, verbose=verbose)
+
+    # Pass 2: Reflection — single session over full wiki
+    state = wiki.read_file("state.md") if (wiki_dir / "state.md").exists() else "(no state yet)"
+    reflection_sys = build_system_prompt(_REFLECTION_PREAMBLE + f"Current state:\n{state}\n\n")
+    if verbose:
+        print("\n[Reflection pass]")
+    run_session(model, tokenizer, reflection_sys, wiki, reflection_prompt, verbose=verbose)
+
+    # Pass 3: Consolidation — single session
+    consolidation_sys = build_system_prompt(_CONSOLIDATION_PREAMBLE)
+    if verbose:
+        print("\n[Consolidation pass]")
+    run_session(model, tokenizer, consolidation_sys, wiki, consolidation_prompt, verbose=verbose)
+
+    return wiki_dir
+
+
+if __name__ == "__main__":
+    import argparse
+    import datetime
+
+    parser = argparse.ArgumentParser(description="Run ispy dream pipeline")
+    parser.add_argument("--descriptions", default="data/descriptions.json")
+    parser.add_argument("--run-dir", default=None, help="Output dir (default: data/runs/TIMESTAMP)")
+    parser.add_argument("--verbose", action="store_true")
+    args = parser.parse_args()
+
+    import prompts as p
+
+    descriptions = json.loads(Path(args.descriptions).read_text())
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = Path(args.run_dir) if args.run_dir else Path("data/runs") / ts
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    wiki_dir = run_dream(
+        descriptions=descriptions,
+        run_dir=run_dir,
+        memory_prompt=p.MEMORY_PROMPT,
+        reflection_prompt=p.REFLECTION_PROMPT,
+        consolidation_prompt=p.CONSOLIDATION_PROMPT,
+        verbose=args.verbose,
+    )
+    print(f"\nWiki written to: {wiki_dir}")
+    print(f"Pages: {len(list(wiki_dir.rglob('*.md')))}")
