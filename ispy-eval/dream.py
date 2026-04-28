@@ -72,3 +72,44 @@ class WikiStore:
         if name == "search_memory":
             return self.search_memory(args.get("query", ""))
         return f"(unknown tool: {name})"
+
+
+_TOOL_PATTERN = re.compile(
+    r'<\|tool_call>\s*call:([a-z_]+)\s*\{(.*)\}\s*<tool_call\|>',
+    re.DOTALL,
+)
+
+
+def preprocess_json(s: str) -> str:
+    """Escape literal newline/tab characters that appear inside JSON strings."""
+    result: list[str] = []
+    in_string = False
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if c == '"' and (i == 0 or s[i - 1] != "\\"):
+            in_string = not in_string
+            result.append(c)
+        elif in_string and c == "\n":
+            result.append("\\n")
+        elif in_string and c == "\t":
+            result.append("\\t")
+        elif in_string and c == "\r":
+            result.append("\\r")
+        else:
+            result.append(c)
+        i += 1
+    return "".join(result)
+
+
+def parse_tool_call(output: str) -> tuple[str, dict] | None:
+    m = _TOOL_PATTERN.search(output)
+    if not m:
+        return None
+    name = m.group(1)
+    raw = "{" + m.group(2) + "}"
+    try:
+        args = json.loads(preprocess_json(raw))
+        return name, args
+    except json.JSONDecodeError:
+        return None

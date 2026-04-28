@@ -81,3 +81,44 @@ def test_index_and_state_excluded_from_list():
         assert "index.md" not in listing
         assert "state.md" not in listing
         assert "entities/dog.md" in listing
+
+
+import json
+from dream import parse_tool_call, preprocess_json
+
+
+def test_parse_json_args():
+    out = '<|tool_call>call:write_file\n{"path":"entities/dog.md","content":"A tan dog."}<tool_call|>'
+    name, args = parse_tool_call(out)
+    assert name == "write_file"
+    assert args["path"] == "entities/dog.md"
+    assert args["content"] == "A tan dog."
+
+
+def test_parse_empty_args():
+    out = '<|tool_call>call:list_memory\n{}<tool_call|>'
+    name, args = parse_tool_call(out)
+    assert name == "list_memory"
+    assert args == {}
+
+
+def test_parse_literal_newline_in_value():
+    # Model emits real \n inside a JSON string — should still parse
+    out = '<|tool_call>call:write_file\n{"path":"a.md","content":"line1\nline2"}<tool_call|>'
+    name, args = parse_tool_call(out)
+    assert args["content"] == "line1\nline2"
+
+
+def test_parse_returns_none_for_plain_text():
+    assert parse_tool_call("just some text from the model") is None
+
+
+def test_preprocess_json_escapes_in_string():
+    raw = '{"content":"line1\nline2"}'
+    result = json.loads(preprocess_json(raw))
+    assert result["content"] == "line1\nline2"
+
+
+def test_preprocess_json_leaves_outside_string_alone():
+    raw = '{"a":1}'
+    assert preprocess_json(raw) == raw
