@@ -1,37 +1,43 @@
 import Foundation
 import LiteRTLMSwift
 
-struct ParsedToolCall {
-    let name: String
-    let args: [String: String]
-}
-
 struct DreamAgent {
     let engine: LiteRTLMEngine
     let wikiStore: WikiStore
     let log: DreamLog
     let promptConfig: PromptConfig
+    var shouldCancel: () -> Bool = { false }
 
-    private let maxIterMemory = 32
-    private let maxIterReflection = 16
-    private let maxIterConsolidation = 50
-    private let strQ = "<|\u{22}|>"
+    private static let maxIterMemory = 32
+    private static let maxIterReflection = 16
+    private static let maxIterConsolidation = 50
 
     // MARK: - Entry point
 
     func run(captures: [MemoryEntry], entropyPages: [String], memoryStore: MemoryStore) async throws {
-        await log.append("Dream started — \(captures.count) unprocessed capture(s)")
+        await log.beginPhase("Captures (\(captures.count))")
+        var cancelled = false
         for (i, capture) in captures.enumerated() {
-            await log.append("[\(i+1)/\(captures.count)] \(capture.timestamp.formatted(.iso8601))")
+            if shouldCancel() {
+                await log.logInfo("⚠ Stopped by user")
+                cancelled = true
+                break
+            }
+            let snippet = capture.description
+                .components(separatedBy: .newlines)
+                .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
+                .map { String($0.prefix(60)) } ?? capture.timestamp.formatted(.dateTime.month().day().hour().minute())
+            await log.beginStep("[\(i+1)/\(captures.count)] \(snippet)")
             try await processCapture(capture, entropyPages: entropyPages, memoryStore: memoryStore)
             try? wikiStore.markDreamed(upTo: capture.timestamp)
             try? memoryStore.updateDream(id: capture.id, dreamDescription: "processed")
+            await log.endStep(success: true)
         }
-        await log.append("Reflecting…")
+        await log.endPhase(success: !cancelled)
+        guard !cancelled && !shouldCancel() else { return }
         try await runReflectionPass()
-        await log.append("Consolidation started")
+        guard !shouldCancel() else { return }
         try await runConsolidationPass()
-        // Clear any pending-chat flag after a full dream cycle
         UserDefaults.standard.set(false, forKey: "chatNeedsDream")
     }
 
@@ -56,7 +62,7 @@ struct DreamAgent {
         try await runSession(
             systemPrompt: buildMemorySystemPrompt(entropyPages: entropyPages),
             userInstruction: userInstruction,
-            maxIter: maxIterMemory,
+            maxIter: Self.maxIterMemory,
             temperature: 0.3,
             logPrefix: "Memory"
         )
@@ -64,37 +70,41 @@ struct DreamAgent {
 
     // MARK: - Reflection pass (two focused rounds with fresh contexts)
 
-    private func runReflectionPass() async throws {
-        // Round 1: explore memory and write initial pattern/reflection pages
+    func runReflectionPass() async throws {
+        await log.beginPhase("Reflection")
+        await log.beginStep("Pass 1 — initial patterns")
         try await runSession(
             systemPrompt: buildReflectionSystemPrompt(state: wikiStore.readState()),
             userInstruction: promptConfig.reflectionInstructions +
                 "\n\nFor this pass: read pages and write your first wave of pattern and reflection pages.",
-            maxIter: maxIterReflection,
+            maxIter: Self.maxIterReflection,
             temperature: 0.6,
             logPrefix: "Reflect"
         )
-        await log.append("Reflection — second pass…")
-        // Round 2: fresh context, sees what round 1 wrote, writes more + updates state.md
+        await log.endStep(success: true)
+        await log.beginStep("Pass 2 — deepen + update state")
         try await runSession(
             systemPrompt: buildReflectionSystemPrompt(state: wikiStore.readState()),
             userInstruction: "You already reflected once. Call list_memory to see everything including what you just wrote. Read your new patterns/ and reflections/ pages. Write 2-3 more from different angles. Then read state.md and rewrite it to reflect your current understanding.",
-            maxIter: maxIterReflection,
+            maxIter: Self.maxIterReflection,
             temperature: 0.6,
             logPrefix: "Reflect(2)"
         )
+        await log.endStep(success: true)
+        await log.endPhase(success: true)
     }
 
     // MARK: - Consolidation pass (two focused rounds with fresh contexts)
 
-    private func runConsolidationPass() async throws {
+    func runConsolidationPass() async throws {
         let basePrompt = buildConsolidationSystemPrompt()
         let hotPages = wikiStore.topAccessedPages(limit: 10)
         let hotList = hotPages.isEmpty ? "" : "\n\nMost-visited pages (prioritize keeping these rich and well-linked):\n" + hotPages.map { "- \($0)" }.joined(separator: "\n")
         let wiki = wikiStore.listWiki()
 
-        // Round 1: full scan + merge duplicates
-        await log.append("Consolidation — scanning and merging…")
+        await log.beginPhase("Consolidation")
+
+        await log.beginStep("Scan and merge duplicates")
         try await runSession(
             systemPrompt: basePrompt,
             userInstruction: """
@@ -112,13 +122,14 @@ struct DreamAgent {
             4. For each deleted page: search_memory for its name, then edit_file every page that linked to it to point to the merged page instead.
             Do not stop until you have read every file.
             """,
-            maxIter: maxIterConsolidation,
+            maxIter: Self.maxIterConsolidation,
             temperature: 0.2,
             logPrefix: "Consolidate"
         )
 
-        // Round 2: abstract grouping + new synthesis pages
-        await log.append("Consolidation — grouping and creating…")
+        await log.endStep(success: true)
+
+        await log.beginStep("Abstract grouping and synthesis")
         try await runSession(
             systemPrompt: basePrompt,
             userInstruction: """
@@ -135,13 +146,14 @@ struct DreamAgent {
             4. If a page covers 2+ unrelated concepts, split it: write both halves, delete the original.
             Do not stop until you have processed every page.
             """,
-            maxIter: maxIterConsolidation,
+            maxIter: Self.maxIterConsolidation,
             temperature: 0.3,
             logPrefix: "Consolidate(2)"
         )
 
-        // Round 3: link weaving
-        await log.append("Consolidation — link weaving…")
+        await log.endStep(success: true)
+
+        await log.beginStep("Link weaving")
         try await runSession(
             systemPrompt: basePrompt,
             userInstruction: """
@@ -158,11 +170,12 @@ struct DreamAgent {
             5. Find orphaned pages (nothing links to them). Connect them into the graph.
             Do not stop until every page has been read and linked.
             """,
-            maxIter: maxIterConsolidation,
+            maxIter: Self.maxIterConsolidation,
             temperature: 0.3,
             logPrefix: "Consolidate(3)"
         )
-        await log.append("Dream complete")
+        await log.endStep(success: true)
+        await log.endPhase(success: true)
     }
 
     // MARK: - Session helpers
@@ -174,10 +187,12 @@ struct DreamAgent {
         temperature: Float,
         logPrefix: String
     ) async throws {
+        let pagesAtStart = wikiStore.pageCount()
         var remainingIter = maxIter
         var currentInstruction = userInstruction
 
         while remainingIter > 0 {
+            guard !shouldCancel() else { return }
             do {
                 try await engine.openSession(temperature: temperature, maxTokens: 16384)
                 defer { engine.closeSession() }
@@ -185,17 +200,19 @@ struct DreamAgent {
                 let firstInput = systemPrompt +
                     "<|turn>user\n" + currentInstruction + "\n<turn|>\n<|turn>model\n"
                 var response = try await runTurn(firstInput, recordingInput: firstInput)
+                await log.logLLM(String(ToolCallParser.stripThinking(response).prefix(160)))
 
                 while remainingIter > 0 {
-                    let clean = stripThinking(response)
-                    guard let call = parseToolCall(from: clean) else {
-                        remainingIter = 0
-                        break
-                    }
+                    guard !shouldCancel() else { return }
+                    let clean = ToolCallParser.stripThinking(response)
+                    guard let call = ToolCallParser.parse(from: clean) else { break }
                     let result = executeToolCall(call)
-                    await log.append("\(logPrefix) → \(call.name)(\(shortArgs(call.args))) → \(result.preview)")
-                    let next = formatToolResponse(call.name, result: result.full) + "<|turn>model\n"
+                    let argPreview = (call.args["path"] ?? call.args.first.map { "\($0.key):\($0.value)" } ?? "")
+                        .prefix(60).replacingOccurrences(of: "\n", with: "↵")
+                    await log.logTool(call.name, args: String(argPreview), preview: result.preview)
+                    let next = ToolCallParser.formatResponse(call.name, result: result.full) + "<|turn>model\n"
                     response = try await runTurn(next, recordingInput: next)
+                    await log.logLLM(String(ToolCallParser.stripThinking(response).prefix(160)))
                     remainingIter -= 1
                 }
                 return // completed normally
@@ -206,15 +223,15 @@ struct DreamAgent {
                                    msg.contains("length") || msg.contains("limit") ||
                                    msg.contains("overflow") || msg.contains("kv")
                 guard isTokenError && remainingIter > 0 else { throw error }
-                await log.append("\(logPrefix) ⚠️ token limit — compacting and resuming (\(remainingIter) iters left)")
+                let pagesCreated = wikiStore.pageCount() - pagesAtStart
+                await log.logInfo("⚠ token limit — compacting (\(remainingIter) iters left, \(pagesCreated) pages created)")
+                // Do NOT include the original task — that causes the model to re-plan from scratch.
+                // Just show current state and tell it to continue the next uncompleted action.
                 currentInstruction = """
-                    You were interrupted by a context limit. Whatever work you completed is already saved in the wiki. Resume from where you left off.
+                    Context compacted — \(pagesCreated) page\(pagesCreated == 1 ? "" : "s") saved so far this session. DO NOT re-plan. Call the NEXT tool immediately to continue where you stopped.
 
-                    Current wiki state:
+                    Current wiki (\(wikiStore.pageCount()) pages total):
                     \(wikiStore.listWiki())
-
-                    Original task:
-                    \(userInstruction)
                     """
             }
         }
@@ -287,7 +304,7 @@ struct DreamAgent {
         s += "- reflections/ ispy's own thoughts. ONLY written during reflection — never during capture.\n\n"
 
         s += "PAGE FORMAT (required for every page):\n"
-        s += "# [Title]\n[First-person paragraph. Link concepts INLINE as they first appear: 'a [[qualities/tan]] dog with a [[qualities/red]] collar ran across the [[places/grass-area]]'.]\n\n## Connections\n[[folder/page]] [[folder/page]] (3+ additional links minimum)\n\n## Sources\n[[memory:UUID]]\n\n"
+        s += "# [Title]\n[First-person paragraph. Link concepts INLINE as they first appear: 'a [[qualities/tan]] dog with a [[qualities/red]] collar ran across the [[places/grass-area]]'.]\n\n## Connections\n[[folder/page]] [[folder/page]] (3+ additional links minimum)\n\n## Sources\n[[exp:UUID]]\n\n"
 
         s += "INLINE LINKS RULE — the most important rule:\n"
         s += "Link the FIRST mention of every notable quality, concept, entity, or place directly in the sentence where it appears.\n"
@@ -301,6 +318,8 @@ struct DreamAgent {
         s += "RIGHT: entities/tan-dog.md + places/grass-area.md + qualities/afternoon-sunlight.md\n\n"
 
         s += "BIDIRECTIONAL LINKS: every [[link]] in page A requires a backlink in page B. Always.\n\n"
+
+        s += "TOOL RULE: After your initial plan, act immediately — call tools, do not describe what you plan to do. One tool call per turn.\n\n"
 
         if !entropyPages.isEmpty {
             s += "Old memories surfaced for context:\n"
@@ -355,7 +374,7 @@ struct DreamAgent {
         s += "Folders: episodes/, entities/, concepts/, places/, qualities/, time/, patterns/, reflections/\n"
         s += "ONE WORD, lowercase. NEVER: objects/, themes/, moods/, misc/, cars/, private/, temp/\n\n"
         s += "Rules:\n"
-        s += "- When merging: keep ALL [[links]] and [[memory:UUID]] from both pages.\n"
+        s += "- When merging: keep ALL [[links]] and [[exp:UUID]] from both pages.\n"
         s += "- Inline links: every notable quality, concept, entity, or place gets [[linked]] at its first mention in the body text, not just collected at the bottom.\n"
         s += "- ## Connections is for additional abstract relationships that didn't fit inline.\n"
         s += "- Every link is bidirectional — always add the backlink in the linked page.\n\n"
@@ -365,7 +384,7 @@ struct DreamAgent {
     }
 
     private func toolDeclarations() -> String {
-        let q = strQ
+        let q = ToolCallParser.strQ
         return """
         <|tool>declaration:list_memory
         description:\(q)List all pages in ispy's memory\(q)
@@ -394,50 +413,4 @@ struct DreamAgent {
         """
     }
 
-    // MARK: - Token helpers
-
-    func stripThinking(_ text: String) -> String {
-        guard let re = try? NSRegularExpression(
-            pattern: #"<\|channel>.*?<channel\|>"#, options: .dotMatchesLineSeparators
-        ) else { return text }
-        return re.stringByReplacingMatches(
-            in: text, range: NSRange(text.startIndex..., in: text), withTemplate: ""
-        )
-    }
-
-    func parseToolCall(from text: String) -> ParsedToolCall? {
-        guard let re = try? NSRegularExpression(
-            pattern: #"<\|tool_call>call:([a-z_]+)\{(.*?)\}<tool_call\|>"#,
-            options: .dotMatchesLineSeparators
-        ), let m = re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
-           let nameRange = Range(m.range(at: 1), in: text),
-           let argsRange = Range(m.range(at: 2), in: text) else { return nil }
-        let name = String(text[nameRange])
-        let args = parseArgs(String(text[argsRange]))
-        return ParsedToolCall(name: name, args: args)
-    }
-
-    private func parseArgs(_ raw: String) -> [String: String] {
-        var result: [String: String] = [:]
-        guard let re = try? NSRegularExpression(
-            pattern: #"(\w+):<\|"\|>(.*?)<\|"\|>"#, options: .dotMatchesLineSeparators
-        ) else { return result }
-        for m in re.matches(in: raw, range: NSRange(raw.startIndex..., in: raw)) {
-            guard let k = Range(m.range(at: 1), in: raw),
-                  let v = Range(m.range(at: 2), in: raw) else { continue }
-            result[String(raw[k])] = String(raw[v])
-        }
-        return result
-    }
-
-    private func formatToolResponse(_ name: String, result: String) -> String {
-        let q = strQ
-        return "<|tool_response>response:\(name){result:\(q)\(result)\(q)}<tool_response|>\n"
-    }
-
-    private func shortArgs(_ args: [String: String]) -> String {
-        args.map { k, v in
-            "\(k):\(String(v.prefix(25)).replacingOccurrences(of: "\n", with: "↵"))"
-        }.joined(separator: ",")
-    }
 }

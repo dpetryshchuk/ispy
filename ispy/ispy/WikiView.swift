@@ -107,6 +107,11 @@ struct ForceGraph: View {
     @State private var dragging: String? = nil
     @State private var seeded = false
     @State private var settled = false
+    // Zoom and pan — explicit coordinate transforms so physics stays in canvas space
+    @State private var zoom: CGFloat = 1
+    @State private var lastZoom: CGFloat = 1
+    @State private var pan: CGSize = .zero
+    @State private var lastPan: CGSize = .zero
 
     private let timer = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common).autoconnect()
 
@@ -114,29 +119,30 @@ struct ForceGraph: View {
         GeometryReader { geo in
             let sz = geo.size
             ZStack {
-                // Edge layer — drawn behind nodes
+                // Edge layer — convert canvas coords to screen coords for drawing
                 Canvas { ctx, canvasSize in
                     for edge in edges {
                         guard let a = positions[edge.a], let b = positions[edge.b] else { continue }
                         var path = Path()
-                        path.move(to: a)
-                        path.addLine(to: b)
-                        ctx.stroke(path, with: .color(.secondary.opacity(0.6)), lineWidth: 1.5)
+                        path.move(to: toScreen(a, size: canvasSize))
+                        path.addLine(to: toScreen(b, size: canvasSize))
+                        ctx.stroke(path, with: .color(.secondary.opacity(0.25)), lineWidth: 1)
                     }
                 }
                 .frame(width: sz.width, height: sz.height)
 
-                // Node layer — needs gestures
+                // Node layer — positioned in screen coords, node drag converts back to canvas
                 ForEach(pages) { page in
                     if let pos = positions[page.id] {
                         GraphNodeView(title: page.title, folder: page.folder, linkCount: page.links.count)
-                            .position(pos)
+                            .scaleEffect(max(0.4, zoom))
+                            .position(toScreen(pos, size: sz))
                             .gesture(
                                 DragGesture(minimumDistance: 4)
                                     .onChanged { v in
                                         dragging = page.id
                                         settled = false
-                                        positions[page.id] = clamp(v.location, size: sz)
+                                        positions[page.id] = toCanvas(v.location, size: sz)
                                         velocities[page.id] = .zero
                                     }
                                     .onEnded { _ in dragging = nil }
@@ -146,6 +152,28 @@ struct ForceGraph: View {
                     }
                 }
             }
+            .contentShape(Rectangle())
+            // Canvas drag = pan (only when not dragging a node)
+            .gesture(
+                DragGesture(minimumDistance: 8)
+                    .onChanged { v in
+                        guard dragging == nil else { return }
+                        pan = CGSize(
+                            width: lastPan.width + v.translation.width,
+                            height: lastPan.height + v.translation.height
+                        )
+                    }
+                    .onEnded { _ in
+                        guard dragging == nil else { return }
+                        lastPan = pan
+                    }
+            )
+            // Pinch = zoom (simultaneous so it works even over nodes)
+            .simultaneousGesture(
+                MagnificationGesture()
+                    .onChanged { v in zoom = max(0.15, min(5, lastZoom * v)) }
+                    .onEnded { _ in lastZoom = zoom }
+            )
             .onAppear {
                 guard !seeded else { return }
                 seed(size: sz)
@@ -166,6 +194,25 @@ struct ForceGraph: View {
         }
     }
 
+    // MARK: - Coordinate transforms
+
+    private func toScreen(_ p: CGPoint, size: CGSize) -> CGPoint {
+        let cx = size.width / 2, cy = size.height / 2
+        return CGPoint(
+            x: (p.x - cx) * zoom + cx + pan.width,
+            y: (p.y - cy) * zoom + cy + pan.height
+        )
+    }
+
+    private func toCanvas(_ p: CGPoint, size: CGSize) -> CGPoint {
+        let cx = size.width / 2, cy = size.height / 2
+        return clamp(
+            CGPoint(x: (p.x - cx - pan.width) / zoom + cx,
+                    y: (p.y - cy - pan.height) / zoom + cy),
+            size: size
+        )
+    }
+
     // MARK: - Seed
 
     private func seed(size: CGSize) {
@@ -182,7 +229,7 @@ struct ForceGraph: View {
         }
     }
 
-    // MARK: - Physics step (pure, called on main but fast)
+    // MARK: - Physics step
 
     private func step(
         pos: [String: CGPoint], vel: [String: CGPoint],
@@ -193,11 +240,13 @@ struct ForceGraph: View {
         var v = vel
         var forces: [String: CGPoint] = Dictionary(uniqueKeysWithValues: pages.map { ($0.id, .zero) })
 
-        let repulsion: CGFloat = 3500
-        let springLen: CGFloat = 110
-        let springK: CGFloat = 0.06
-        let damping: CGFloat = 0.78
-        let gravity: CGFloat = 0.012
+        let n = CGFloat(max(pages.count, 1))
+        let repulsion: CGFloat = 6000
+        let maxForce: CGFloat = 150          // cap prevents explosion when nodes start close together
+        let springLen: CGFloat = 100 + n * 4 // longer springs for larger graphs so nodes spread out
+        let springK: CGFloat = 0.03
+        let damping: CGFloat = n > 15 ? 0.82 : 0.76 // more damping for large graphs reduces oscillation
+        let gravity: CGFloat = 0.008
 
         for i in 0..<pages.count {
             for j in (i+1)..<pages.count {
@@ -205,7 +254,7 @@ struct ForceGraph: View {
                 guard let pa = p[a], let pb = p[b] else { continue }
                 let dx = pa.x - pb.x, dy = pa.y - pb.y
                 let dist = max(hypot(dx, dy), 0.5)
-                let f = repulsion / (dist * dist)
+                let f = min(repulsion / (dist * dist), maxForce)
                 let nx = f * dx / dist, ny = f * dy / dist
                 forces[a]!.x += nx; forces[a]!.y += ny
                 forces[b]!.x -= nx; forces[b]!.y -= ny
@@ -289,19 +338,21 @@ struct GraphNodeView: View {
     let linkCount: Int
 
     var body: some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 5) {
             Circle()
-                .fill(folderColor(folder).opacity(0.85))
+                .fill(folderColor(folder))
                 .frame(width: size, height: size)
-                .shadow(color: folderColor(folder).opacity(0.4), radius: 4)
+                .shadow(color: folderColor(folder).opacity(0.25), radius: 2, x: 0, y: 1)
             Text(title)
-                .font(.system(size: 9))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .frame(maxWidth: 76)
         }
     }
 
-    private var size: CGFloat { CGFloat(14 + min(linkCount, 8) * 3) }
+    private var size: CGFloat { CGFloat(8 + min(linkCount, 8) * 2) }
 }
 
 // MARK: - Markdown renderer
@@ -423,13 +474,14 @@ struct WikiPageView: View {
     private var rawContent: String { wikiStore.readFile(path: page.path) }
 
     private var displayContent: String {
-        rawContent.replacingOccurrences(of: #"\[\[memory:[^\]]+\]\]"#, with: "", options: .regularExpression)
+        rawContent
+            .replacingOccurrences(of: #"\[\[exp:[^\]]+\]\]"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"\[\[([^\]]+)\]\]"#, with: "$1", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var memoryLinks: [String] {
-        guard let re = try? NSRegularExpression(pattern: #"\[\[memory:([0-9A-Fa-f-]{36})\]\]"#) else { return [] }
+        guard let re = try? NSRegularExpression(pattern: #"\[\[exp:([0-9A-Fa-f-]{36})\]\]"#) else { return [] }
         let s = rawContent
         return re.matches(in: s, range: NSRange(s.startIndex..., in: s)).compactMap { m in
             Range(m.range(at: 1), in: s).map { String(s[$0]) }

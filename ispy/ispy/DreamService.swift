@@ -6,6 +6,9 @@ import BackgroundTasks
 final class DreamService {
     private(set) var isRunning = false
     private(set) var lastError: String?
+    private var _cancelled = false
+
+    func cancel() { _cancelled = true }
 
     private let wikiStore: WikiStore
     private let log: DreamLog
@@ -27,6 +30,7 @@ final class DreamService {
         }
 
         isRunning = true
+        _cancelled = false
         lastError = nil
         log.clear()
         defer { isRunning = false }
@@ -34,20 +38,64 @@ final class DreamService {
         do {
             let captures = unprocessedCaptures(memoryStore: memoryStore)
             guard !captures.isEmpty else {
-                await log.append("No new memories to process")
+                log.beginPhase("Nothing to process")
+                log.beginStep("Check captures")
+                log.logInfo("No captures since last dream")
+                log.endStep(success: true)
+                log.endPhase(success: true)
                 return
             }
 
-            let entropyPages = selectEntropyPages(limit: 2)
-            for page in entropyPages {
-                await log.append("Surfacing old memory: \(page)")
-            }
-
-            let agent = DreamAgent(engine: engine, wikiStore: wikiStore, log: log, promptConfig: promptConfig)
-            try await agent.run(captures: captures, entropyPages: entropyPages, memoryStore: memoryStore)
+            var agent = DreamAgent(engine: engine, wikiStore: wikiStore, log: log, promptConfig: promptConfig)
+            agent.shouldCancel = { [weak self] in self?._cancelled ?? false }
+            try await agent.run(captures: captures, entropyPages: [], memoryStore: memoryStore)
         } catch {
             lastError = error.localizedDescription
-            await log.append("Error: \(error.localizedDescription)")
+            log.logError(error.localizedDescription)
+        }
+        log.save()
+    }
+
+    func reflect() async {
+        guard !isRunning else { return }
+        guard gemmaService.state == .ready, let engine = gemmaService.engine else {
+            lastError = "Gemma model not loaded — open Capture tab and load the model first"
+            return
+        }
+        isRunning = true
+        _cancelled = false
+        lastError = nil
+        log.clear()
+        defer { isRunning = false }
+        do {
+            var agent = DreamAgent(engine: engine, wikiStore: wikiStore, log: log, promptConfig: promptConfig)
+            agent.shouldCancel = { [weak self] in self?._cancelled ?? false }
+            try await agent.runReflectionPass()
+        } catch {
+            lastError = error.localizedDescription
+            log.logError(error.localizedDescription)
+        }
+        log.save()
+    }
+
+    func consolidate() async {
+        guard !isRunning else { return }
+        guard gemmaService.state == .ready, let engine = gemmaService.engine else {
+            lastError = "Gemma model not loaded — open Capture tab and load the model first"
+            return
+        }
+        isRunning = true
+        _cancelled = false
+        lastError = nil
+        log.clear()
+        defer { isRunning = false }
+        do {
+            var agent = DreamAgent(engine: engine, wikiStore: wikiStore, log: log, promptConfig: promptConfig)
+            agent.shouldCancel = { [weak self] in self?._cancelled ?? false }
+            try await agent.runConsolidationPass()
+        } catch {
+            lastError = error.localizedDescription
+            log.logError(error.localizedDescription)
         }
         log.save()
     }
@@ -65,6 +113,9 @@ final class DreamService {
                 return
             }
             Task { @MainActor in
+                if self.gemmaService.state != .ready {
+                    await self.gemmaService.start()
+                }
                 let memoryStore = MemoryStore()
                 await self.dream(memoryStore: memoryStore)
                 task.setTaskCompleted(success: self.lastError == nil)
@@ -89,9 +140,4 @@ final class DreamService {
         return memoryStore.entries.filter { $0.timestamp > cursor }
     }
 
-    private func selectEntropyPages(limit: Int) -> [String] {
-        let pages = wikiStore.oldestCachePages(limit: limit * 3)
-        guard !pages.isEmpty else { return [] }
-        return Array(pages.shuffled().prefix(limit))
-    }
 }

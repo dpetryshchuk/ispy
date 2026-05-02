@@ -2,7 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     private let gemmaService: GemmaVisionService
-    private let fastVLMService: FastVLMVisionService
+    private let lfmService: LFMVisionService
     private let memoryStore: MemoryStore
     private let wikiStore: WikiStore
     private let dreamLog: DreamLog
@@ -15,13 +15,13 @@ struct RootView: View {
 
     init() {
         let gemma = GemmaVisionService()
-        let fastVLM = FastVLMVisionService()
+        let lfm = LFMVisionService()
         let memory = MemoryStore()
         let wiki = WikiStore()
         let log = DreamLog()
         let prompts = PromptConfig()
         self.gemmaService = gemma
-        self.fastVLMService = fastVLM
+        self.lfmService = lfm
         self.memoryStore = memory
         self.wikiStore = wiki
         self.dreamLog = log
@@ -47,7 +47,7 @@ struct RootView: View {
             .tag(0)
 
             // MARK: Capture
-            CaptureView(fastVLMService: fastVLMService, memoryStore: memoryStore)
+            CaptureView(lfmService: lfmService, memoryStore: memoryStore, isDreaming: dreamService.isRunning)
                 .tabItem { Label("Capture", systemImage: "camera.fill") }
                 .tag(1)
 
@@ -75,11 +75,15 @@ struct RootView: View {
                 pendingCount: memoryStore.entries.filter { $0.dreamDescription == nil }.count,
                 devStageOverride: devStageOverride
             )
-            .tabItem { Label("creature", systemImage: "sparkle") }
-            .tag(4)
+.tabItem { Label("creature", systemImage: "sparkle") }
+                .tag(4)
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                EnergyHUD()
+            }
         }
         .task {
-            await gemmaService.start()
             dreamService.registerBackgroundTask()
             dreamService.scheduleNextDream()
         }

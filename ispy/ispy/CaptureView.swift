@@ -29,8 +29,9 @@ struct BatchEntry: Identifiable {
 // MARK: - CaptureView
 
 struct CaptureView: View {
-    let fastVLMService: FastVLMVisionService
+    let lfmService: LFMVisionService
     let memoryStore: MemoryStore
+    let isDreaming: Bool
 
     @StateObject private var camera = CameraCapture()
 
@@ -82,7 +83,7 @@ struct CaptureView: View {
                               let image = UIImage(data: data) else { return }
                         selectedImage = image
                         reset()
-                        if fastVLMService.state.isReady { analyze(image: image) }
+                        if lfmService.state.isReady { analyze(image: image) }
                     }
                 } else {
                     // Multi-pick — batch flow
@@ -91,10 +92,11 @@ struct CaptureView: View {
             }
             .onAppear {
                 camera.start()
-                Task { await fastVLMService.load() }
+                // Don't load the vision model while dreaming — both models in RAM simultaneously can OOM
+                if !isDreaming { Task { await lfmService.load() } }
             }
             .onDisappear { camera.stop() }
-            .onChange(of: fastVLMService.state) { _, newState in
+            .onChange(of: lfmService.state) { _, newState in
                 if newState == .ready, let image = selectedImage, description == nil, !isAnalyzing {
                     analyze(image: image)
                 }
@@ -145,7 +147,7 @@ struct CaptureView: View {
                 camera.capturePhoto { image in
                     selectedImage = image
                     errorMessage = image == nil ? "Capture failed" : nil
-                    if let image, fastVLMService.state.isReady { analyze(image: image) }
+                    if let image, lfmService.state.isReady { analyze(image: image) }
                 }
             } label: {
                 ZStack {
@@ -163,6 +165,7 @@ struct CaptureView: View {
     private var batchFlow: some View {
         let isProcessing = batch.contains { $0.status.isActive }
         let savedCount  = batch.filter { if case .saved = $0.status { return true }; return false }.count
+        let failedCount = batch.filter { if case .failed = $0.status { return true }; return false }.count
         let allDone     = !isProcessing
 
         return VStack(spacing: 0) {
@@ -177,9 +180,14 @@ struct CaptureView: View {
 
             Group {
                 if allDone {
-                    Text("\(savedCount) experience\(savedCount == 1 ? "" : "s") added")
+                    if failedCount > 0 {
+                        Text("\(savedCount) saved · \(failedCount) failed")
+                            .foregroundStyle(failedCount == batch.count ? .red : .secondary)
+                    } else {
+                        Text("\(savedCount) experience\(savedCount == 1 ? "" : "s") added")
+                    }
                 } else {
-                    Text("Analyzing \(savedCount + 1) of \(batch.count)…")
+                    Text("Analyzing \(savedCount + failedCount + 1) of \(batch.count)…")
                 }
             }
             .font(.system(size: 12, design: .monospaced))
@@ -227,11 +235,13 @@ struct CaptureView: View {
                 batch[i].status = .analyzing
 
                 do {
-                    let desc = try await fastVLMService.describe(image: image)
+                    let desc = try await lfmService.describe(image: image)
                     try? memoryStore.save(image: image, description: desc)
                     batch[i].status = .saved
                 } catch {
-                    batch[i].status = .failed(error.localizedDescription)
+                    let msg = error.localizedDescription
+                    print("[Batch \(i+1)/\(items.count)] failed: \(msg)")
+                    batch[i].status = .failed(msg)
                 }
             }
         }
@@ -254,13 +264,13 @@ struct CaptureView: View {
                             size: 90,
                             isAnalyzing: true
                         )
-                        if fastVLMService.streamingOutput.isEmpty {
+                        if lfmService.streamingOutput.isEmpty {
                             Text("Analyzing…")
                                 .font(.caption).foregroundStyle(.secondary)
                         } else {
                             ScrollViewReader { proxy in
                                 ScrollView {
-                                    Text(fastVLMService.streamingOutput)
+                                    Text(lfmService.streamingOutput)
                                         .font(.system(size: 11, design: .monospaced))
                                         .foregroundStyle(.secondary)
                                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -268,7 +278,7 @@ struct CaptureView: View {
                                         .padding(.horizontal, 4)
                                 }
                                 .frame(maxHeight: 110)
-                                .onChange(of: fastVLMService.streamingOutput) { _, _ in
+                                .onChange(of: lfmService.streamingOutput) { _, _ in
                                     withAnimation { proxy.scrollTo("stream", anchor: .bottom) }
                                 }
                             }
@@ -280,19 +290,19 @@ struct CaptureView: View {
                     VStack(spacing: 8) {
                         Button("Analyze") { analyze(image: image) }
                             .buttonStyle(.borderedProminent)
-                            .disabled(!fastVLMService.state.isReady)
+                            .disabled(!lfmService.state.isReady)
                         Button("Retake") { clearAll() }.buttonStyle(.bordered)
-                        if case .downloading(let p) = fastVLMService.state {
+                        if case .downloading(let p) = lfmService.state {
                             ProgressView(value: p)
                                 .frame(width: 120)
                             Text("Downloading model…")
                                 .font(.caption).foregroundStyle(.secondary)
-                        } else if fastVLMService.state == .loading {
+                        } else if lfmService.state == .loading {
                             ProgressView()
                             Text("Loading model…")
                                 .font(.caption).foregroundStyle(.secondary)
-                        } else if fastVLMService.state == .idle {
-                            Text("Loading FastVLM…")
+                        } else if lfmService.state == .idle {
+                            Text("Loading LFM…")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -408,9 +418,9 @@ struct CaptureView: View {
 
     @ViewBuilder
     private var modelStatusIndicator: some View {
-        switch fastVLMService.state {
+        switch lfmService.state {
         case .idle:
-            Button("Load FastVLM") { Task { await fastVLMService.load() } }.font(.caption)
+            Button("Load LFM") { Task { await lfmService.load() } }.font(.caption)
         case .downloading(let p):
             ProgressView(value: p).frame(width: 60).scaleEffect(0.8)
         case .loading:
@@ -427,7 +437,7 @@ struct CaptureView: View {
     private func analyze(image: UIImage) {
         isAnalyzing = true; errorMessage = nil
         Task {
-            do { description = try await fastVLMService.describe(image: image) }
+            do { description = try await lfmService.describe(image: image) }
             catch { errorMessage = error.localizedDescription }
             isAnalyzing = false
         }
@@ -480,9 +490,6 @@ struct BatchThumbnailCell: View {
                 .frame(width: 22, height: 22)
             if case .loading = entry.status {
                 ProgressView().scaleEffect(0.45).tint(.white)
-            } else if case .analyzing = entry.status {
-                Image(systemName: entry.status.icon)
-                    .font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
             } else {
                 Image(systemName: entry.status.icon)
                     .font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
