@@ -311,9 +311,11 @@ def run_session(
 
 # ── Model loader ──────────────────────────────────────────────────────────────
 
-# Models live in ispy-eval/models/gemma-4-E2B-it/.
+# Models live in ispy-eval/models/gemma-4-e2b-it/.
 # Run download_models.py once to fetch them. After that, no internet needed.
-_GEMMA_MODEL_DIR = Path(__file__).parent / "models" / "gemma-4-E2B-it"
+# Using the mlx-community OptiQ-4bit build — google/gemma-4-E2B-it is a VLM
+# and can't be loaded directly by mlx_lm; this is the text-only MLX conversion.
+_GEMMA_MODEL_DIR = Path(__file__).parent / "models" / "gemma-4-e2b-it"
 
 def load_model():
     # Loads Gemma 4 E2B from the local models/ directory.

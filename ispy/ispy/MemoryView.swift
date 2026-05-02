@@ -39,33 +39,55 @@ struct MemoryView: View {
         ContentUnavailableView("Nothing here yet", systemImage: "camera", description: Text("Capture your first photo."))
     }
 
+    private struct DayGroup {
+        let day: Date
+        let entries: [MemoryEntry]
+    }
+
+    private var dayGroups: [DayGroup] {
+        let cal = Calendar.current
+        let grouped = Dictionary(grouping: memoryStore.entries.reversed()) {
+            cal.startOfDay(for: $0.timestamp)
+        }
+        return grouped.keys.sorted(by: >).map { day in
+            DayGroup(day: day, entries: grouped[day]!.sorted { $0.timestamp > $1.timestamp })
+        }
+    }
+
     private var listView: some View {
         List {
-            ForEach(Array(memoryStore.entries.reversed())) { entry in
-                Button { selectedEntry = entry } label: {
-                    HStack(spacing: 12) {
-                        ThumbnailView(url: memoryStore.photoURL(for: entry))
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            let processed = lastDreamed.map { entry.timestamp <= $0 } ?? false
-                            HStack(spacing: 6) {
-                                Circle()
-                                    .fill(processed ? Color.purple.opacity(0.7) : Color.secondary.opacity(0.2))
-                                    .frame(width: 6, height: 6)
-                                Text(entry.timestamp, format: .dateTime.day().month().hour().minute())
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+            ForEach(dayGroups, id: \.day) { group in
+                Section {
+                    ForEach(group.entries) { entry in
+                        Button { selectedEntry = entry } label: {
+                            HStack(spacing: 12) {
+                                ThumbnailView(url: memoryStore.photoURL(for: entry))
+                                VStack(alignment: .leading, spacing: 4) {
+                                    let processed = lastDreamed.map { entry.timestamp <= $0 } ?? false
+                                    HStack(spacing: 6) {
+                                        Circle()
+                                            .fill(processed ? Color.purple.opacity(0.7) : Color.secondary.opacity(0.2))
+                                            .frame(width: 6, height: 6)
+                                        Text(entry.timestamp, format: .dateTime.hour().minute())
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Text(entry.description.components(separatedBy: .newlines).first ?? "")
+                                        .lineLimit(2)
+                                        .font(.subheadline)
+                                }
                             }
-                            Text(entry.description.components(separatedBy: .newlines).first ?? "")
-                                .lineLimit(2)
-                                .font(.subheadline)
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) { try? memoryStore.delete(id: entry.id) } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
                         }
                     }
-                }
-                .swipeActions(edge: .trailing) {
-                    Button(role: .destructive) { try? memoryStore.delete(id: entry.id) } label: {
-                        Label("Delete", systemImage: "trash")
-                    }
+                } header: {
+                    Text(group.day, format: .dateTime.weekday(.wide).day().month().year())
+                        .font(.caption)
+                        .textCase(nil)
                 }
             }
         }

@@ -298,7 +298,7 @@ Never.
                 for m in regex.matches(in: content, range: range) {
                     if let r = Range(m.range(at: 1), in: content) {
                         let link = String(content[r])
-                        if !link.hasPrefix("memory:") { links.append(link) }
+                        if !link.hasPrefix("exp:") { links.append(link) }
                     }
                 }
             }
@@ -324,7 +324,8 @@ Never.
         var pages: [String] = []
         for case let url as URL in enumerator {
             guard url.pathExtension == "md",
-                  url.lastPathComponent != "state.md" else { continue }
+                  url.lastPathComponent != "state.md",
+                  url.lastPathComponent != "index.md" else { continue }
             let p = url.standardizedFileURL.path
             guard p.hasPrefix(base) else { continue }
             pages.append(String(p.dropFirst(base.count)))

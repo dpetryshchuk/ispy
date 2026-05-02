@@ -32,14 +32,10 @@ Inline links first: in the body text of each page, [[link]] the first mention of
 After writing: open each linked page and add a backlink. Every link must be bidirectional.
 ## Connections is for additional relationships that didn't fit inline (abstract or secondary connections).
 
-STEP 4 — Update the episode log.
-Create or update episodes/{MEMORY_DATE}.md. Add a bullet for this observation.
-Link the episode page to every entity, place, and concept you wrote above.
+STEP 4 — Tag sources.
+Add [[exp:{MEMORY_ID}]] to every page you touched under ## Sources.
 
-STEP 5 — Tag sources.
-Add [[memory:{MEMORY_ID}]] to every page you touched under ## Sources.
-
-STEP 6 — Verify.
+STEP 5 — Verify.
 Call list_memory. Count pages created or updated. If fewer than 6, keep writing.
 
 Reply with the plain-text list of all pages created or updated.
@@ -51,7 +47,7 @@ You will be given the full file list. Use read_file on EVERY page before making 
 You cannot find duplicates or missing links without reading the content.
 
 MERGING DUPLICATES:
-Same folder, similar name = likely duplicate. Read both. Merge into one page keeping ALL content, ALL [[links]], ALL [[memory:UUID]] tags.
+Same folder, similar name = likely duplicate. Read both. Merge into one page keeping ALL content, ALL [[links]], ALL [[exp:UUID]] tags.
 After writing the merged page: delete_file each redundant page, then fix every page that linked to the deleted files.
 Example: kitchen.md + kitchen-counter.md + kitchen-area.md → one merged entities/kitchen-counter.md, delete the other two.
 
@@ -197,7 +193,7 @@ Describe everything you observe with rich, specific detail. Be exhaustive — ev
     // MARK: - Persistence
 
     // Bump this when any default prompt changes — forces a one-time reset on next launch.
-    private static let currentVersion = 5
+    private static let currentVersion = 7
 
     private static let url: URL = {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]

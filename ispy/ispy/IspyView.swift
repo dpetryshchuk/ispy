@@ -16,7 +16,7 @@ private let stages: [EvolutionStage] = [
     EvolutionStage(minCaptures: 500),  // star
 ]
 
-private let stageNames = ["dot", "line", "triangle", "diamond", "pentagon", "hexagon", "star"]
+let stageNames = ["dot", "line", "triangle", "diamond", "pentagon", "hexagon", "star"]
 
 func evolutionStageIndex(for captures: Int) -> Int {
     var idx = 0

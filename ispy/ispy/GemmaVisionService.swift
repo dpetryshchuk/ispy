@@ -17,6 +17,7 @@ final class GemmaVisionService {
 
     var state: State = .needsDownload
     var downloadProgress: Double = 0
+    private(set) var activeBackend: String = "none"
     private let downloader = ModelDownloader()
     var engine: LiteRTLMEngine?
 
@@ -48,19 +49,20 @@ final class GemmaVisionService {
 
     private func loadModel() async {
         state = .loading
-        // Try GPU first, fall back to CPU if engine creation fails
         for backend in ["gpu", "cpu"] {
             let e = LiteRTLMEngine(modelPath: downloader.modelPath, backend: backend)
             do {
                 try await e.load()
                 engine = e
+                activeBackend = backend
                 state = .ready
+                print("[GemmaVisionService] Loaded on \(backend.uppercased())")
                 return
             } catch {
+                print("[GemmaVisionService] \(backend.uppercased()) load failed: \(error)")
                 if backend == "cpu" {
                     state = .error(error.localizedDescription)
                 }
-                // else try next backend
             }
         }
     }

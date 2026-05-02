@@ -33,7 +33,6 @@ final class ChatService {
     private var sessionOpen = false
     private var firstTurn = true
 
-    private let strQ = "<|\u{22}|>"
     private let maxToolIter = 15
 
     init(wikiStore: WikiStore, memoryStore: MemoryStore, promptConfig: PromptConfig) {
@@ -87,13 +86,14 @@ final class ChatService {
                 if isTokenError(error) { response = try await compactAndResend(text: text, engine: engine); compacted = true }
                 else { throw error }
             }
+            dropEmptyAssistantBubble()
 
             for _ in 0..<maxToolIter {
-                let clean = stripThinking(response)
-                guard let call = parseToolCall(from: clean) else { break }
+                let clean = ToolCallParser.stripThinking(response)
+                guard let call = ToolCallParser.parse(from: clean) else { break }
                 let result = executeToolCall(call)
                 messages.append(ChatMessage(role: .tool(name: call.name), text: result.preview))
-                let next = formatToolResponse(call.name, result: result.full) + "<|turn>model\n"
+                let next = ToolCallParser.formatResponse(call.name, result: result.full) + "<|turn>model\n"
                 do {
                     response = try await streamTurn(next)
                 } catch {
@@ -101,10 +101,17 @@ final class ChatService {
                         response = try await compactAndResend(text: text, engine: engine); compacted = true
                     } else { throw error }
                 }
+                dropEmptyAssistantBubble()
             }
         } catch {
             self.error = error.localizedDescription
             sessionOpen = false
+        }
+    }
+
+    private func dropEmptyAssistantBubble() {
+        if let last = messages.last, case .assistant = last.role, last.text.isEmpty {
+            messages.removeLast()
         }
     }
 
@@ -205,9 +212,11 @@ final class ChatService {
         messages.append(ChatMessage(role: .assistant, text: "", isStreaming: true))
         for try await chunk in engine.sessionGenerateStreaming(input: input) {
             output += chunk
-            let display = stripThinking(output).replacingOccurrences(
-                of: #"<\|tool_call>.*"#, with: "", options: .regularExpression
-            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawStripped = ToolCallParser.stripThinking(output)
+            // Cut off everything from the first tool call token onwards — works for multi-line JSON args
+            let toolStart = rawStripped.range(of: "<|tool_call>")
+            let display = (toolStart.map { String(rawStripped[..<$0.lowerBound]) } ?? rawStripped)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             messages[idx].text = display
         }
         messages[idx].isStreaming = false
@@ -289,14 +298,22 @@ final class ChatService {
         s += promptConfig.chatPersonalityPrompt + "\n\n"
         let state = wikiStore.readState()
         s += "--- YOUR CURRENT STATE OF MIND (file: state.md) ---\n\(state)\n\n"
-        s += "To update your state of mind, use write_file or edit_file on path \"state.md\".\n\n"
+        s += """
+        MEMORY TOOLS — use them constantly, not as a last resort:
+        - ANY question about what you've seen, experienced, or noticed → call search_memory or list_memory FIRST, then answer.
+        - ANY question about a specific thing (person, object, place, color) → call search_memory with that term.
+        - Never say "I don't know" or "I haven't seen" without calling search_memory first.
+        - After gaining a new insight from conversation, call edit_file on state.md to record it.
+        - Do not describe what you would do — use the tool call immediately.
+
+        """
         s += toolDeclarations()
         s += "<turn|>\n"
         return s
     }
 
     private func toolDeclarations() -> String {
-        let q = strQ
+        let q = ToolCallParser.strQ
         return """
         <|tool>declaration:list_memory
         description:\(q)List all pages in ispy's memory\(q)
@@ -333,46 +350,6 @@ final class ChatService {
         """
     }
 
-    // MARK: - Token helpers (reused from DreamAgent)
-
-    func stripThinking(_ text: String) -> String {
-        guard let re = try? NSRegularExpression(
-            pattern: #"<\|channel>.*?<channel\|>"#, options: .dotMatchesLineSeparators
-        ) else { return text }
-        return re.stringByReplacingMatches(
-            in: text, range: NSRange(text.startIndex..., in: text), withTemplate: ""
-        )
-    }
-
-    func parseToolCall(from text: String) -> ParsedToolCall? {
-        guard let re = try? NSRegularExpression(
-            pattern: #"<\|tool_call>call:([a-z_]+)\{(.*?)\}<tool_call\|>"#,
-            options: .dotMatchesLineSeparators
-        ), let m = re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
-           let nameRange = Range(m.range(at: 1), in: text),
-           let argsRange = Range(m.range(at: 2), in: text) else { return nil }
-        let name = String(text[nameRange])
-        let args = parseArgs(String(text[argsRange]))
-        return ParsedToolCall(name: name, args: args)
-    }
-
-    private func parseArgs(_ raw: String) -> [String: String] {
-        var result: [String: String] = [:]
-        guard let re = try? NSRegularExpression(
-            pattern: #"(\w+):<\|"\|>(.*?)<\|"\|>"#, options: .dotMatchesLineSeparators
-        ) else { return result }
-        for m in re.matches(in: raw, range: NSRange(raw.startIndex..., in: raw)) {
-            guard let k = Range(m.range(at: 1), in: raw),
-                  let v = Range(m.range(at: 2), in: raw) else { continue }
-            result[String(raw[k])] = String(raw[v])
-        }
-        return result
-    }
-
-    private func formatToolResponse(_ name: String, result: String) -> String {
-        let q = strQ
-        return "<|tool_response>response:\(name){result:\(q)\(result)\(q)}<tool_response|>\n"
-    }
 }
 
 enum ChatError: LocalizedError {

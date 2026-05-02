@@ -5,12 +5,11 @@ struct MindView: View {
     let memoryStore: MemoryStore
     let dreamService: DreamService
     let dreamLog: DreamLog
-    let chatService: ChatService
-    let gemmaService: GemmaVisionService
 
     @State private var selectedPage: WikiPage?
     @State private var showGraph = false
     @State private var showKnowledgeMap = false
+    @State private var showDreamLog = false
 
     var body: some View {
         NavigationStack {
@@ -25,15 +24,6 @@ struct MindView: View {
             .navigationTitle("Memory")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    NavigationLink {
-                        ChatView(chatService: chatService, gemmaService: gemmaService,
-                                 memoryStore: memoryStore, wikiStore: wikiStore,
-                                 dreamService: dreamService)
-                    } label: {
-                        Image(systemName: "bubble.left.and.bubble.right")
-                    }
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         withAnimation(.easeInOut(duration: 0.3)) { showGraph.toggle() }
@@ -42,16 +32,26 @@ struct MindView: View {
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        Task { await dreamService.dream(memoryStore: memoryStore) }
-                    } label: {
-                        if dreamService.isRunning {
-                            ProgressView().scaleEffect(0.8)
-                        } else {
+                    if dreamService.isRunning {
+                        ProgressView().scaleEffect(0.8)
+                    } else {
+                        Menu {
+                            Button("Dream") {
+                                showDreamLog = true
+                                Task { await dreamService.dream(memoryStore: memoryStore) }
+                            }
+                            Button("Reflect only") {
+                                showDreamLog = true
+                                Task { await dreamService.reflect() }
+                            }
+                            Button("Consolidate only") {
+                                showDreamLog = true
+                                Task { await dreamService.consolidate() }
+                            }
+                        } label: {
                             Text("Dream")
                         }
                     }
-                    .disabled(dreamService.isRunning)
                 }
             }
             .sheet(item: $selectedPage) { page in
@@ -61,6 +61,9 @@ struct MindView: View {
             }
             .sheet(isPresented: $showKnowledgeMap) {
                 KnowledgeMapView(wikiStore: wikiStore)
+            }
+            .sheet(isPresented: $showDreamLog) {
+                DreamView(dreamService: dreamService, dreamLog: dreamLog, memoryStore: memoryStore)
             }
         }
     }
@@ -91,22 +94,29 @@ struct MindView: View {
     }
 
     private var activeDreamBanner: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                ProgressView().scaleEffect(0.75)
-                Text("Dreaming now")
-                    .font(.caption).foregroundStyle(.purple)
+        Button { showDreamLog = true } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    ProgressView().scaleEffect(0.75)
+                    Text("Dreaming now")
+                        .font(.caption).fontWeight(.semibold).foregroundStyle(.purple)
+                    Spacer()
+                    Text("View log →")
+                        .font(.caption2).foregroundStyle(.purple.opacity(0.7))
+                }
+                if let phase = dreamLog.phases.last {
+                    Text(phase.label)
+                        .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+                    if let step = phase.runningStep {
+                        Text("  → \(step.label)")
+                            .font(.system(size: 10, design: .monospaced)).foregroundStyle(.tertiary)
+                    }
+                }
             }
-
-            let recent = Array(dreamLog.entries.suffix(6))
-            ForEach(recent) { entry in
-                Text("[\(entry.timeString)] \(entry.message)")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
+            .padding()
+            .background(Color(.secondarySystemBackground))
         }
-        .padding()
-        .background(Color(.secondarySystemBackground))
+        .buttonStyle(.plain)
     }
 
     private var wikiFilesSection: some View {
@@ -258,7 +268,10 @@ struct DreamNarrativeCard: View {
             let displayEntries = expanded ? session.entries : Array(session.entries.prefix(previewCount))
 
             ForEach(displayEntries, id: \.timestamp) { entry in
-                NarrativeSessionEntryRow(entry: entry)
+                NarrativeEntryRow(
+                    timestamp: entry.timestamp.formatted(.dateTime.hour().minute()),
+                    message: entry.message
+                )
             }
 
             if session.entries.count > previewCount {
@@ -274,26 +287,6 @@ struct DreamNarrativeCard: View {
         .padding(.vertical, 8)
 
         Divider()
-    }
-}
-
-private struct NarrativeSessionEntryRow: View {
-    let entry: DreamSession.Entry
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text(entry.timestamp, format: .dateTime.hour().minute())
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
-                .frame(width: 48, alignment: .trailing)
-                .padding(.top, 3)
-            Text(entry.message)
-                .font(.subheadline)
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer()
-        }
-        .padding(.horizontal)
     }
 }
 
@@ -317,7 +310,7 @@ struct DreamHistoryView: View {
                 List {
                     ForEach(sessions) { session in
                         NavigationLink {
-                            DreamSessionView(session: session)
+                            SessionDetailView(session: session)
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(session.startedAt, format: .dateTime.weekday().day().month().year())

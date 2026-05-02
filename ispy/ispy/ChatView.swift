@@ -6,11 +6,18 @@ struct ChatView: View {
     let memoryStore: MemoryStore
     let wikiStore: WikiStore
     let dreamService: DreamService
+    let promptConfig: PromptConfig
+    @Binding var devStageOverride: Int?
 
     @State private var input = ""
     @State private var showState = false
+    @State private var showDevSettings = false
     @State private var needsDreamCheck = false
     @FocusState private var focused: Bool
+
+    private var stageIndex: Int {
+        devStageOverride ?? evolutionStageIndex(for: memoryStore.entries.count)
+    }
 
     var body: some View {
         NavigationStack {
@@ -27,7 +34,7 @@ struct ChatView: View {
                     inputBar
                 }
             }
-            .navigationTitle("Chat")
+            .navigationTitle("ispy")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     if chatService.messages.isEmpty {
@@ -41,15 +48,32 @@ struct ChatView: View {
                     }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showState = true
-                    } label: {
-                        Image(systemName: "person.text.rectangle")
+                    HStack(spacing: 4) {
+                        Button {
+                            showState = true
+                        } label: {
+                            Image(systemName: "person.text.rectangle")
+                        }
+                        Button {
+                            showDevSettings = true
+                        } label: {
+                            Image(systemName: "gearshape")
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
             .sheet(isPresented: $showState) {
                 StateFileView(wikiStore: wikiStore)
+            }
+            .sheet(isPresented: $showDevSettings) {
+                DevSettingsView(
+                    promptConfig: promptConfig,
+                    memoryStore: memoryStore,
+                    wikiStore: wikiStore,
+                    gemmaService: gemmaService,
+                    devStageOverride: $devStageOverride
+                )
             }
             .onChange(of: gemmaService.state) { _, _ in
                 chatService.setEngine(gemmaService.engine)
@@ -101,12 +125,18 @@ struct ChatView: View {
     // MARK: - Subviews
 
     private var modelNotReadyBanner: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle")
                 .foregroundStyle(.orange)
-            Text("Model not loaded — go to Capture tab to load Gemma 4")
+            Text("Model not loaded")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Spacer()
+            Button("Load") {
+                Task { await gemmaService.start() }
+            }
+            .font(.caption)
+            .buttonStyle(.bordered)
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
@@ -154,12 +184,14 @@ struct ChatView: View {
             }
 
         case .assistant:
-            HStack(alignment: .top) {
+            HStack(alignment: .top, spacing: 8) {
+                IspyShapeView(stageIndex: stageIndex, size: 28, isAnalyzing: msg.isStreaming)
+                    .padding(.top, 6)
                 if msg.text.isEmpty && msg.isStreaming {
                     thinkingIndicator
                 } else {
                     AssistantBubble(text: msg.text, isStreaming: msg.isStreaming, memoryStore: memoryStore)
-                    Spacer(minLength: 60)
+                    Spacer(minLength: 40)
                 }
             }
 
@@ -273,7 +305,7 @@ struct AssistantBubble: View {
     private var segments: [Segment] {
         var result: [Segment] = []
         var seenUUIDs = Set<UUID>()
-        guard let re = try? NSRegularExpression(pattern: #"\[\[memory:([0-9A-Fa-f-]{36})\]\]"#) else {
+        guard let re = try? NSRegularExpression(pattern: #"\[\[exp:([0-9A-Fa-f-]{36})\]\]"#) else {
             return [Segment(kind: .text(text))]
         }
         let ns = text as NSString

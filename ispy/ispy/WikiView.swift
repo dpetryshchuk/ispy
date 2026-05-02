@@ -107,7 +107,10 @@ struct ForceGraph: View {
     @State private var dragging: String? = nil
     @State private var seeded = false
     @State private var settled = false
-    // Zoom and pan — explicit coordinate transforms so physics stays in canvas space
+    // Physics canvas — larger than the screen so nodes have room to breathe
+    @State private var canvas: CGSize = .zero
+    @State private var screenSize: CGSize = .zero
+    // Zoom and pan transform canvas → screen
     @State private var zoom: CGFloat = 1
     @State private var lastZoom: CGFloat = 1
     @State private var pan: CGSize = .zero
@@ -119,30 +122,30 @@ struct ForceGraph: View {
         GeometryReader { geo in
             let sz = geo.size
             ZStack {
-                // Edge layer — convert canvas coords to screen coords for drawing
-                Canvas { ctx, canvasSize in
+                // Edges drawn by mapping physics positions → screen coords
+                Canvas { ctx, _ in
                     for edge in edges {
                         guard let a = positions[edge.a], let b = positions[edge.b] else { continue }
                         var path = Path()
-                        path.move(to: toScreen(a, size: canvasSize))
-                        path.addLine(to: toScreen(b, size: canvasSize))
+                        path.move(to: toScreen(a, screen: sz))
+                        path.addLine(to: toScreen(b, screen: sz))
                         ctx.stroke(path, with: .color(.secondary.opacity(0.25)), lineWidth: 1)
                     }
                 }
                 .frame(width: sz.width, height: sz.height)
 
-                // Node layer — positioned in screen coords, node drag converts back to canvas
+                // Nodes placed at their screen-space position; drag maps back to canvas space
                 ForEach(pages) { page in
                     if let pos = positions[page.id] {
                         GraphNodeView(title: page.title, folder: page.folder, linkCount: page.links.count)
-                            .scaleEffect(max(0.4, zoom))
-                            .position(toScreen(pos, size: sz))
+                            .scaleEffect(max(0.3, zoom))
+                            .position(toScreen(pos, screen: sz))
                             .gesture(
                                 DragGesture(minimumDistance: 4)
                                     .onChanged { v in
                                         dragging = page.id
                                         settled = false
-                                        positions[page.id] = toCanvas(v.location, size: sz)
+                                        positions[page.id] = toCanvas(v.location, screen: sz)
                                         velocities[page.id] = .zero
                                     }
                                     .onEnded { _ in dragging = nil }
@@ -153,40 +156,37 @@ struct ForceGraph: View {
                 }
             }
             .contentShape(Rectangle())
-            // Canvas drag = pan (only when not dragging a node)
             .gesture(
                 DragGesture(minimumDistance: 8)
                     .onChanged { v in
                         guard dragging == nil else { return }
-                        pan = CGSize(
-                            width: lastPan.width + v.translation.width,
-                            height: lastPan.height + v.translation.height
-                        )
+                        pan = CGSize(width: lastPan.width + v.translation.width,
+                                     height: lastPan.height + v.translation.height)
                     }
-                    .onEnded { _ in
-                        guard dragging == nil else { return }
-                        lastPan = pan
-                    }
+                    .onEnded { _ in guard dragging == nil else { return }; lastPan = pan }
             )
-            // Pinch = zoom (simultaneous so it works even over nodes)
             .simultaneousGesture(
                 MagnificationGesture()
-                    .onChanged { v in zoom = max(0.15, min(5, lastZoom * v)) }
+                    .onChanged { v in zoom = max(0.05, min(5, lastZoom * v)) }
                     .onEnded { _ in lastZoom = zoom }
             )
             .onAppear {
+                screenSize = sz
                 guard !seeded else { return }
-                seed(size: sz)
+                // Physics canvas: big enough for all nodes to spread at ~200pt spacing
+                let n = CGFloat(max(pages.count, 1))
+                let side = max(n * 80, 1000)
+                canvas = CGSize(width: side, height: side)
+                seed()
                 seeded = true
+                // Start zoomed out to fit the whole canvas in view
+                let fit = min(sz.width / canvas.width, sz.height / canvas.height) * 0.85
+                zoom = fit; lastZoom = fit
             }
             .onReceive(timer) { _ in
-                guard seeded, !settled else { return }
-                let (newPos, newVel, done) = step(
-                    pos: positions, vel: velocities,
-                    pages: pages, edges: edges,
-                    center: CGPoint(x: sz.width / 2, y: sz.height / 2),
-                    size: sz, pinned: dragging
-                )
+                guard seeded, !settled, canvas.width > 0 else { return }
+                let center = CGPoint(x: canvas.width / 2, y: canvas.height / 2)
+                let (newPos, newVel, done) = step(center: center, pinned: dragging)
                 positions = newPos
                 velocities = newVel
                 settled = done
@@ -194,66 +194,62 @@ struct ForceGraph: View {
         }
     }
 
-    // MARK: - Coordinate transforms
+    // MARK: - Coordinate transforms (canvas ↔ screen)
 
-    private func toScreen(_ p: CGPoint, size: CGSize) -> CGPoint {
-        let cx = size.width / 2, cy = size.height / 2
+    private func toScreen(_ p: CGPoint, screen: CGSize) -> CGPoint {
+        let ccx = canvas.width / 2, ccy = canvas.height / 2
+        let scx = screen.width / 2, scy = screen.height / 2
         return CGPoint(
-            x: (p.x - cx) * zoom + cx + pan.width,
-            y: (p.y - cy) * zoom + cy + pan.height
+            x: (p.x - ccx) * zoom + scx + pan.width,
+            y: (p.y - ccy) * zoom + scy + pan.height
         )
     }
 
-    private func toCanvas(_ p: CGPoint, size: CGSize) -> CGPoint {
-        let cx = size.width / 2, cy = size.height / 2
-        return clamp(
-            CGPoint(x: (p.x - cx - pan.width) / zoom + cx,
-                    y: (p.y - cy - pan.height) / zoom + cy),
-            size: size
-        )
+    private func toCanvas(_ p: CGPoint, screen: CGSize) -> CGPoint {
+        let ccx = canvas.width / 2, ccy = canvas.height / 2
+        let scx = screen.width / 2, scy = screen.height / 2
+        let x = (p.x - scx - pan.width) / zoom + ccx
+        let y = (p.y - scy - pan.height) / zoom + ccy
+        return clampToCanvas(CGPoint(x: x, y: y))
     }
 
     // MARK: - Seed
 
-    private func seed(size: CGSize) {
+    private func seed() {
         let n = max(pages.count, 1)
-        let cx = size.width / 2, cy = size.height / 2
-        let r = min(size.width, size.height) * 0.33
+        let cx = canvas.width / 2, cy = canvas.height / 2
+        let r = min(canvas.width, canvas.height) * 0.35
         for (i, page) in pages.enumerated() {
             let angle = (Double(i) / Double(n)) * 2 * .pi
             positions[page.id] = CGPoint(
-                x: cx + CGFloat(cos(angle)) * r + CGFloat.random(in: -8...8),
-                y: cy + CGFloat(sin(angle)) * r + CGFloat.random(in: -8...8)
+                x: cx + CGFloat(cos(angle)) * r + CGFloat.random(in: -10...10),
+                y: cy + CGFloat(sin(angle)) * r + CGFloat.random(in: -10...10)
             )
             velocities[page.id] = .zero
         }
     }
 
-    // MARK: - Physics step
+    // MARK: - Physics step (runs in canvas space, independent of screen size)
 
-    private func step(
-        pos: [String: CGPoint], vel: [String: CGPoint],
-        pages: [WikiPage], edges: [GraphEdge],
-        center: CGPoint, size: CGSize, pinned: String?
-    ) -> ([String: CGPoint], [String: CGPoint], Bool) {
-        var p = pos
-        var v = vel
+    private func step(center: CGPoint, pinned: String?) -> ([String: CGPoint], [String: CGPoint], Bool) {
+        var p = positions
+        var v = velocities
         var forces: [String: CGPoint] = Dictionary(uniqueKeysWithValues: pages.map { ($0.id, .zero) })
 
         let n = CGFloat(max(pages.count, 1))
-        let repulsion: CGFloat = 6000
-        let maxForce: CGFloat = 150          // cap prevents explosion when nodes start close together
-        let springLen: CGFloat = 100 + n * 4 // longer springs for larger graphs so nodes spread out
-        let springK: CGFloat = 0.03
-        let damping: CGFloat = n > 15 ? 0.82 : 0.76 // more damping for large graphs reduces oscillation
-        let gravity: CGFloat = 0.008
+        let repulsion: CGFloat = 8000
+        let maxForce: CGFloat = 200            // cap so close nodes don't explode outward
+        let springLen: CGFloat = canvas.width / max(n, 6) * 1.5  // natural spacing = canvas / nodeCount
+        let springK: CGFloat = 0.025
+        let damping: CGFloat = 0.80
+        let gravity: CGFloat = 0.006
 
         for i in 0..<pages.count {
             for j in (i+1)..<pages.count {
                 let a = pages[i].id, b = pages[j].id
                 guard let pa = p[a], let pb = p[b] else { continue }
                 let dx = pa.x - pb.x, dy = pa.y - pb.y
-                let dist = max(hypot(dx, dy), 0.5)
+                let dist = max(hypot(dx, dy), 1)
                 let f = min(repulsion / (dist * dist), maxForce)
                 let nx = f * dx / dist, ny = f * dy / dist
                 forces[a]!.x += nx; forces[a]!.y += ny
@@ -264,7 +260,7 @@ struct ForceGraph: View {
         for edge in edges {
             guard let pa = p[edge.a], let pb = p[edge.b] else { continue }
             let dx = pb.x - pa.x, dy = pb.y - pa.y
-            let dist = max(hypot(dx, dy), 0.5)
+            let dist = max(hypot(dx, dy), 1)
             let f = springK * (dist - springLen)
             let nx = f * dx / dist, ny = f * dy / dist
             forces[edge.a]!.x += nx; forces[edge.a]!.y += ny
@@ -279,17 +275,18 @@ struct ForceGraph: View {
             let deg = CGFloat(page.links.count + 1)
             vt.x = (vt.x + ft.x) * damping + (center.x - pt.x) * gravity * deg
             vt.y = (vt.y + ft.y) * damping + (center.y - pt.y) * gravity * deg
-            pt = clamp(CGPoint(x: pt.x + vt.x, y: pt.y + vt.y), size: size)
+            pt = clampToCanvas(CGPoint(x: pt.x + vt.x, y: pt.y + vt.y))
             p[id] = pt; v[id] = vt
             maxSpeed = max(maxSpeed, hypot(vt.x, vt.y))
         }
 
-        return (p, v, maxSpeed < 0.3)
+        return (p, v, maxSpeed < 0.5)
     }
 
-    private func clamp(_ pt: CGPoint, size: CGSize) -> CGPoint {
-        CGPoint(x: max(60, min(size.width - 60, pt.x)),
-                y: max(60, min(size.height - 60, pt.y)))
+    private func clampToCanvas(_ pt: CGPoint) -> CGPoint {
+        let m: CGFloat = 80
+        return CGPoint(x: max(m, min(canvas.width - m, pt.x)),
+                       y: max(m, min(canvas.height - m, pt.y)))
     }
 
     // MARK: - Edge resolution: full path, filename-only, then title
