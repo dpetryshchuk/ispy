@@ -1,0 +1,158 @@
+import SwiftUI
+import UIKit
+
+struct MemoryView: View {
+    let memoryStore: MemoryStore
+    let lastDreamed: Date?
+    @State private var selectedEntry: MemoryEntry?
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if memoryStore.entries.isEmpty {
+                    emptyView
+                } else {
+                    listView
+                }
+            }
+            .navigationTitle("Experiences")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if !memoryStore.entries.isEmpty {
+                        Text("\(memoryStore.entries.count)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
+            }
+            .sheet(item: $selectedEntry) { entry in
+                MemoryDetailView(entry: entry, photoURL: memoryStore.photoURL(for: entry)) {
+                    try? memoryStore.delete(id: entry.id)
+                    selectedEntry = nil
+                }
+            }
+        }
+    }
+
+    private var emptyView: some View {
+        ContentUnavailableView("Nothing here yet", systemImage: "camera", description: Text("Capture your first photo."))
+    }
+
+    private struct DayGroup {
+        let day: Date
+        let entries: [MemoryEntry]
+    }
+
+    private var dayGroups: [DayGroup] {
+        let cal = Calendar.current
+        let grouped = Dictionary(grouping: memoryStore.entries.reversed()) {
+            cal.startOfDay(for: $0.timestamp)
+        }
+        return grouped.keys.sorted(by: >).map { day in
+            DayGroup(day: day, entries: grouped[day]!.sorted { $0.timestamp > $1.timestamp })
+        }
+    }
+
+    private var listView: some View {
+        List {
+            ForEach(dayGroups, id: \.day) { group in
+                Section {
+                    ForEach(group.entries) { entry in
+                        Button { selectedEntry = entry } label: {
+                            HStack(spacing: 12) {
+                                ThumbnailView(url: memoryStore.photoURL(for: entry))
+                                VStack(alignment: .leading, spacing: 4) {
+                                    let processed = lastDreamed.map { entry.timestamp <= $0 } ?? false
+                                    HStack(spacing: 6) {
+                                        Circle()
+                                            .fill(processed ? Color.purple.opacity(0.7) : Color.secondary.opacity(0.2))
+                                            .frame(width: 6, height: 6)
+                                        Text(entry.timestamp, format: .dateTime.hour().minute())
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Text(entry.description.components(separatedBy: .newlines).first ?? "")
+                                        .lineLimit(2)
+                                        .font(.subheadline)
+                                }
+                            }
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) { try? memoryStore.delete(id: entry.id) } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                } header: {
+                    Text(group.day, format: .dateTime.weekday(.wide).day().month().year())
+                        .font(.caption)
+                        .textCase(nil)
+                }
+            }
+        }
+        .listStyle(.plain)
+    }
+}
+
+// MARK: - Async thumbnail loader
+
+struct ThumbnailView: View {
+    let url: URL
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let img = image {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Color(.tertiarySystemBackground)
+                    .overlay { Image(systemName: "photo").foregroundStyle(.quaternary) }
+            }
+        }
+        .frame(width: 52, height: 52)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .task(id: url) {
+            let path = url.path
+            let loaded = await Task.detached(priority: .userInitiated) {
+                UIImage(contentsOfFile: path)
+            }.value
+            image = loaded
+        }
+    }
+}
+
+struct MemoryDetailView: View {
+    let entry: MemoryEntry
+    let photoURL: URL
+    let onDelete: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if let image = UIImage(contentsOfFile: photoURL.path) {
+                        Image(uiImage: image).resizable().scaledToFit()
+                    }
+                    Text(entry.timestamp, format: .dateTime.weekday().day().month().year().hour().minute())
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text(entry.description)
+                    if let dream = entry.dreamDescription {
+                        Text(dream).foregroundStyle(.secondary)
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Memory")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .destructiveAction) {
+                    Button(role: .destructive, action: onDelete) { Image(systemName: "trash") }
+                }
+            }
+        }
+    }
+}
